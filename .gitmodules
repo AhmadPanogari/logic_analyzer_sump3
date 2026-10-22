@@ -1,0 +1,6 @@
+[submodule "third_party/sump3"]
+	path = third_party/sump3
+	url = https://github.com/blackmesalabs/sump3
+[submodule "third_party/MesaBusProtocol"]
+	path = third_party/MesaBusProtocol
+	url = https://github.com/blackmesalabs/MesaBusProtocol

@@ -1,0 +1,13 @@
+# Vivado
+vivado/build_*/
+vivado/*.log
+vivado/*.jou
+vivado/.Xil/
+*.backup.*
+# Simulation
+sim/build/
+*.vcd
+# Host runtime ( sump3.py / bd_server.py working directory )
+host/work/
+__pycache__/
+*.sr
