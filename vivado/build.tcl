@@ -9,7 +9,8 @@
 # Output in vivado/build_<board>/ :
 #   la_top.bit      JTAG ( Vivado Hardware Manager )
 #   la_top.bit.bin  Linux FPGA manager ( byte swapped, like bootgen -process_bitstream )
-#   la_top.xsa      Hardware platform ( antminer_s9 only, for an FSBL / ps7_init )
+#   la_top.xsa      Hardware platform ( antminer_s9 only, for an FSBL )
+#   ps7_init.tcl    PS clock setup for JTAG only boot ( antminer_s9, s9_jtag_load.tcl )
 #   *.rpt           Timing, utilization and I/O reports
 #
 # Board selects ../constraints/<board>.xdc and the top level:
@@ -70,6 +71,7 @@ if { $use_ps } {
     CONFIG.PCW_USE_M_AXI_GP0             {0}   \
     CONFIG.PCW_EN_CLK0_PORT              {1}   \
     CONFIG.PCW_EN_RST0_PORT              {1}   \
+    CONFIG.PCW_CRYSTAL_PERIPHERAL_FREQMHZ {33.333333} \
     CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ  {100} \
     CONFIG.PCW_UART1_PERIPHERAL_ENABLE   {1}   \
     CONFIG.PCW_UART1_UART1_IO            {MIO 48 .. 49} \
@@ -90,6 +92,14 @@ if { $use_ps } {
   set_property synth_checkpoint_mode None $bd_file
   generate_target all $bd_file
   make_wrapper -files $bd_file -top
+
+  # ps7_init.tcl is used by s9_jtag_load.tcl to start the PS clocks over JTAG
+  set ps7_init [find_file $out_dir ps7_init.tcl]
+  if { $ps7_init ne "" } {
+    file copy -force $ps7_init "$out_dir/ps7_init.tcl"
+  } else {
+    puts "WARNING: ps7_init.tcl not found, JTAG only boot will not work"
+  }
   set wrapper [find_file $out_dir la_ps_wrapper.v]
   if { $wrapper eq "" } {
     puts "ERROR: la_ps_wrapper.v was not generated"

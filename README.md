@@ -41,7 +41,8 @@ Di PulseView semua protocol decoder (UART, SPI, I2C, dll.) bisa langsung dipakai
 | `constraints/zybo_z7_10.xdc` | Pin Digilent Zybo Z7-10 |
 | `constraints/arty_z7_10.xdc` | Pin Digilent Arty Z7-10 |
 | `vivado/build.tcl` | Build Vivado batch (untuk S9 juga membuat block design PS7) → `.bit` + `.bit.bin` |
-| `vivado/program.tcl` | Program PL lewat JTAG |
+| `vivado/program.tcl` | Program PL lewat JTAG (Zybo/Arty) |
+| `vivado/s9_jtag_load.tcl` | S9 tanpa SD/Linux: program PL + nyalakan clock PS (FCLK0) lewat XSCT |
 | `host/la.py` | Launcher: `server` (bd_server), `gui` (sump3), `view` (PulseView) |
 | `host/sump3_vcd2sr.py` | Konverter VCD SUMP3 → sigrok `.sr` + buka PulseView |
 | `host/s9_load_bitstream.sh` | Dijalankan di Linux board S9: muat bitstream lewat FPGA manager |
@@ -91,9 +92,8 @@ Hal penting tentang board kontrol S9 (dari skematik, didokumentasikan oleh proye
 [polprog/antminer_zynq](https://github.com/polprog/antminer_zynq)):
 
 * **PL tidak punya oscillator** (Y2/Y3 100 MHz tidak terpasang). Clock 100 MHz diambil
-  dari PS (`FCLK_CLK0`), jadi **PS harus sudah di-boot** sebelum logic analyzer jalan.
-  Cara paling mudah: boot Linux dari microSD (mis. image Ardzy; boot loader-nya men-set
-  FCLK0 = 100 MHz), lalu muat bitstream kita.
+  dari PS (`FCLK_CLK0`), jadi clock PS harus dinyalakan lebih dulu: lewat JTAG dengan
+  `vivado/s9_jtag_load.tcl` (tanpa SD/Linux), atau oleh boot loader Linux dari microSD.
 * UART konsol J12 milik PS (Linux `ttyPS0`), **tidak** dipakai untuk MesaBus. MesaBus
   memakai USB-UART 3.3V terpisah di konektor J1.
 * Semua I/O PL ada di 9 konektor hash-board J1..J9 (2×9 pin), semuanya 3,3 V.
@@ -182,44 +182,81 @@ Untuk `antminer_s9`, skrip membuat block design `la_ps` berisi `processing_syste
 Hasil di `vivado/build_<board>/`:
 * `la_top.bit` — untuk JTAG (Vivado Hardware Manager)
 * `la_top.bit.bin` — untuk FPGA manager Linux (word di-byte-swap, setara `bootgen -process_bitstream bin`)
+* `ps7_init.tcl` — inisialisasi PS untuk `s9_jtag_load.tcl` (S9)
 * `la_top.xsa` — hardware platform (S9), jika ingin membuat FSBL sendiri
 * laporan timing/utilisasi/IO
 
 ## 2. Memuat bitstream
 
-### Antminer S9 — dari Linux di board (direkomendasikan)
+### Antminer S9 — JTAG saja (tanpa SD card / Linux)
 
-1. Set jumper boot ke **TF card** (JP1=0, JP2=1, JP3=0, JP4=1 menurut dokumentasi Ardzy)
-   dan boot Linux dari microSD (mis. image Ardzy). Boot loader-nya menyalakan FCLK0 = 100 MHz
-   dan mengaktifkan level shifter PS↔PL.
-2. Hentikan program/servis yang mengakses desain PL sebelumnya lewat AXI (setelah desain
-   ini dimuat, alamat AXI tersebut kosong; akses ke sana membuat bus macet dan watchdog
-   me-reset board).
-3. Salin dan muat:
+Cara paling sederhana untuk verifikasi. Yang dibutuhkan:
+
+* Kabel JTAG Xilinx/Digilent (Platform Cable USB, JTAG-HS2/HS3, atau klon FT2232H yang
+  dikenali Vivado) ke **J10** (header JTAG Xilinx 14-pin standar; pin 2 = VREF 3,3 V,
+  pin ganjil = GND).
+* **XSCT**. Program ini ikut terpasang bersama Vitis (atau Xilinx SDK untuk Vivado
+  ≤ 2019.1). Vivado Hardware Manager saja tidak cukup, karena tidak bisa menjalankan
+  inisialisasi PS.
+
+Langkah:
+
+1. Matikan board. Set jumper boot **JP1..JP4 semua 0 (Cascade JTAG)**.
+2. Sambungkan kabel JTAG ke J10 dan adapter USB-UART ke J1 (lihat tabel wiring). Nyalakan 12 V.
+3. Build (sekali): `vivado/build.sh antminer_s9`. Selain bitstream, build ini juga
+   menghasilkan `ps7_init.tcl`.
+4. Tutup Vivado Hardware Manager (kabel hanya bisa dipakai satu program), lalu:
+
+```sh
+vivado/s9_jtag_load.sh            # Linux    ( = xsct vivado/s9_jtag_load.tcl )
+vivado\s9_jtag_load.bat           # Windows
+```
+
+Skrip tersebut:
+1. Melakukan `rst -system` lalu memprogram `la_top.bit` ke PL.
+2. Menjalankan **hanya** bagian PLL dan clock dari `ps7_init.tcl`. Inisialisasi DDR dan
+   MIO dilewati karena tidak dipakai logic analyzer, dan setting DDR di block design ini
+   memang tidak disesuaikan untuk S9.
+3. Menjalankan `ps7_post_config`: menyalakan level shifter PS↔PL (tanpa ini FCLK0 tidak
+   sampai ke PL) dan melepas reset FPGA.
+4. Membaca balik register clock dan mencetak frekuensinya, misalnya:
+
+```
+ IO PLL      : 1000.000 MHz ( FDIV 30, locked 1 )
+ FCLK0       : 100.000 MHz ( DIV0 10, DIV1 1 )
+ LVL_SHFTR_EN: 0xF ( expect 0xF )
+OK: LED D5 should now blink ( ~0.75 Hz ) and D6 be on.
+```
+
+Checklist verifikasi di board:
+
+| Langkah | Tanda berhasil |
+|---|---|
+| Setelah skrip JTAG | Output `FCLK0 : 100.000 MHz`, LED D5 berkedip ±0,75 Hz, D6 menyala |
+| Jumper J9 pin 5 → GND | LED D7 menyala (pola uji aktif) |
+| `python host/la.py server --port COMx` lalu `python host/la.py gui` → **Connect** | LED D8 berkedip; sump3.py menampilkan `ck100_hub`, `probe_pod`, `debug_pod` |
+| **Acquire** → **Save_VCD** | PulseView terbuka; decoder UART di D0 @115200 membaca `Hello SUMP3 PulseView` |
+
+Semua bersifat volatile: setelah board mati, jalankan lagi langkah 4. CPU ARM tetap
+dalam keadaan halt; itu tidak masalah karena PL hanya butuh FCLK0.
+
+### Antminer S9 — alternatif: dari Linux di board
+
+Jika board di-boot dari microSD (jumper **TF card**: JP1=0, JP2=1, JP3=0, JP4=1; mis.
+image Ardzy yang men-set FCLK0 = 100 MHz):
+
+1. Hentikan program/servis yang mengakses desain PL sebelumnya lewat AXI. Setelah desain
+   ini dimuat, alamat AXI tersebut kosong, dan akses ke sana membuat bus macet sehingga
+   watchdog me-reset board.
+2. Salin dan muat:
 
 ```sh
 scp vivado/build_antminer_s9/la_top.bit.bin host/s9_load_bitstream.sh root@<ip-board>:/tmp/
 ssh root@<ip-board> sh /tmp/s9_load_bitstream.sh /tmp/la_top.bit.bin
 ```
 
-LED D5 berkedip (~0,75 Hz) dan D6 menyala menandakan desain jalan dengan clock.
-Bitstream hilang saat board dimatikan; ulangi langkah 3 (atau pasang di skrip boot).
-
-### Antminer S9 — lewat JTAG
-
-Konektor J10 adalah header JTAG Xilinx 14-pin standar (VREF 3,3 V). Saat Linux sudah
-jalan dari microSD (FCLK0 aktif), PL bisa juga diprogram dari Vivado:
-
-```sh
-vivado -mode batch -source vivado/program.tcl -tclargs antminer_s9
-```
-
-Tanpa OS sama sekali (boot mode JTAG), PS harus diinisialisasi dulu (`ps7_init` dari
-`la_top.xsa` lewat XSCT) agar FCLK0 hidup. Konfigurasi DDR di block design ini tidak
-disesuaikan dengan board S9, jadi alur ini **belum diuji**; pakai alur Linux di atas.
-
-> Kalau board di-boot dengan firmware asli Bitmain (NAND), FCLK0 belum tentu 100 MHz dan
-> software Bitmain terus mengakses FPGA-nya. Tidak disarankan.
+> Firmware asli Bitmain (boot NAND) tidak disarankan: FCLK0 belum tentu 100 MHz dan
+> software Bitmain terus mengakses FPGA-nya.
 
 ### Zybo Z7-10 / Arty Z7-10
 
@@ -335,7 +372,8 @@ men-decode UART pola uji (`Hello SUMP3 PulseView`).
 | Gejala | Cek |
 |---|---|
 | `Invalid Hardware ID` di sump3.py | TX/RX tertukar? GND tersambung? Port/baud bd_server benar? LED UART RX (S9: D8, Zybo/Arty: `led[3]`) berkedip saat connect? |
-| S9: LED heartbeat tidak berkedip | FCLK0 tidak jalan: PS belum di-boot / boot loader tidak menyalakan FCLK0. Cek `cat /sys/class/fpga_manager/fpga0/state` = `operating` |
+| S9: LED heartbeat tidak berkedip | FCLK0 tidak jalan. JTAG: lihat output `s9_jtag_load.tcl` (FCLK0, `LVL_SHFTR_EN`). Linux: cek `cat /sys/class/fpga_manager/fpga0/state` = `operating` |
+| S9: XSCT tidak menemukan target `APU` / `A9` | Jumper boot bukan Cascade JTAG, VREF/kabel J10, atau Vivado Hardware Manager masih memegang kabel |
 | S9: board reboot setelah load bitstream | Ada program yang masih mengakses desain PL lama lewat AXI → hentikan dulu |
 | S9: waktu di PulseView meleset | FCLK0 bukan 100 MHz; samakan `--samplerate` dengan frekuensi FCLK0 sebenarnya |
 | bd_server tidak bisa buka port | Port dipakai program lain (PuTTY, Vivado serial), nama port salah |
