@@ -42,7 +42,7 @@ Di PulseView semua protocol decoder (UART, SPI, I2C, dll.) bisa langsung dipakai
 | `constraints/arty_z7_10.xdc` | Pin Digilent Arty Z7-10 |
 | `vivado/build.tcl` | Build Vivado batch (untuk S9 juga membuat block design PS7) → `.bit` + `.bit.bin` |
 | `vivado/program.tcl` | Program PL lewat JTAG (Zybo/Arty) |
-| `vivado/s9_jtag_load.tcl` | S9 tanpa SD/Linux: program PL + nyalakan clock PS (FCLK0) lewat XSCT |
+| `vivado/s9_jtag_load.tcl` | S9 tanpa SD/Linux: program PL + nyalakan clock PS (FCLK0) lewat XSDB/XSCT |
 | `host/la.py` | Launcher: `server` (bd_server), `gui` (sump3), `view` (PulseView) |
 | `host/sump3_vcd2sr.py` | Konverter VCD SUMP3 → sigrok `.sr` + buka PulseView |
 | `host/s9_load_bitstream.sh` | Dijalankan di Linux board S9: muat bitstream lewat FPGA manager |
@@ -173,7 +173,9 @@ Aktif dengan jumper J9 pin 5 → GND (S9) atau `sw[0] = 1` (Zybo/Arty):
 
 ## 1. Build bitstream (Vivado)
 
-Butuh Vivado (2019.2 atau lebih baru; edisi gratis/WebPACK sudah mendukung XC7Z010).
+Butuh Vivado (2019.2 atau lebih baru, sudah diuji build dengan **2025.2**; edisi
+gratis Standard/WebPACK sudah mendukung XC7Z010). Hasil build `antminer_s9` di 2025.2:
+WNS +3,57 ns @100 MHz, 9 RAMB36 + 2 RAMB18, 0 critical warning.
 
 ```sh
 cd vivado
@@ -201,9 +203,9 @@ Cara paling sederhana untuk verifikasi. Yang dibutuhkan:
 * Kabel JTAG Xilinx/Digilent (Platform Cable USB, JTAG-HS2/HS3, atau klon FT2232H yang
   dikenali Vivado) ke **J10** (header JTAG Xilinx 14-pin standar; pin 2 = VREF 3,3 V,
   pin ganjil = GND).
-* **XSCT**. Program ini ikut terpasang bersama Vitis (atau Xilinx SDK untuk Vivado
-  ≤ 2019.1). Vivado Hardware Manager saja tidak cukup, karena tidak bisa menjalankan
-  inisialisasi PS.
+* **XSDB** (ikut terpasang bersama Vivado: `<Vivado>\bin\xsdb.bat`) atau **XSCT** (Vitis /
+  Xilinx SDK). Vivado Hardware Manager saja tidak cukup, karena tidak bisa menjalankan
+  inisialisasi PS. Launcher memakai `xsct` jika ada di PATH, jika tidak `xsdb`.
 
 Langkah:
 
@@ -214,7 +216,7 @@ Langkah:
 4. Tutup Vivado Hardware Manager (kabel hanya bisa dipakai satu program), lalu:
 
 ```sh
-vivado/s9_jtag_load.sh            # Linux    ( = xsct vivado/s9_jtag_load.tcl )
+vivado/s9_jtag_load.sh            # Linux    ( = xsdb/xsct vivado/s9_jtag_load.tcl )
 vivado\s9_jtag_load.bat           # Windows
 ```
 

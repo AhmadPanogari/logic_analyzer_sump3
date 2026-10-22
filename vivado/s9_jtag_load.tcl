@@ -1,7 +1,8 @@
 # -----------------------------------------------------------------------------
 # JTAG only bring-up for the Antminer S9 control board ( no SD card, no Linux ).
 #
-#   xsct vivado/s9_jtag_load.tcl            ( Vitis / SDK, or: xsdb ... )
+#   xsct vivado/s9_jtag_load.tcl            ( Vitis / SDK )
+#   xsdb vivado/s9_jtag_load.tcl            ( ships with Vivado 2025.x )
 #   xsct vivado/s9_jtag_load.tcl <build_dir>
 #
 # Board: boot jumpers JP1..JP4 all at 0 ( "Cascade JTAG" ), Xilinx/Digilent
