@@ -46,6 +46,7 @@ Di PulseView semua protocol decoder (UART, SPI, I2C, dll.) bisa langsung dipakai
 | `host/la.py` | Launcher: `server` (bd_server), `gui` (sump3), `view` (PulseView) |
 | `host/sump3_vcd2sr.py` | Konverter VCD SUMP3 → sigrok `.sr` + buka PulseView |
 | `host/s9_load_bitstream.sh` | Dijalankan di Linux board S9: muat bitstream lewat FPGA manager |
+| `docs/ROADMAP_PULSEVIEW.md` | Rencana pengembangan: PulseView sebagai GUI utama |
 | `sim/` | Testbench Icarus Verilog (MesaBus UART → baca HW ID SUMP3) |
 | `fetch_third_party.py` | Mengisi `third_party/` (git submodule, atau unduh ZIP jika tanpa git) |
 | `third_party/sump3` | Submodule [blackmesalabs/sump3](https://github.com/blackmesalabs/sump3) |
@@ -390,6 +391,18 @@ men-decode UART pola uji (`Hello SUMP3 PulseView`).
 | Waktu di PulseView salah skala | `--samplerate` tidak sama dengan `ck_freq_mhz` SUMP3 |
 | Sinyal pod hilang dari VCD | View pod tersebut belum ditampilkan di window sump3.py |
 | Channel tanpa kabel bergerak acak | Hubungkan GND; input sudah pull-down tapi kabel panjang tetap bisa menangkap noise |
+
+## Pengembangan
+
+Rencana menjadikan **PulseView sebagai GUI utama** (Run/Stop, samplerate, trigger langsung
+dari PulseView ke hardware lewat bd_server, tanpa GUI `sump3.py`) ada di
+[`docs/ROADMAP_PULSEVIEW.md`](docs/ROADMAP_PULSEVIEW.md):
+
+1. **Fase 1**: client SUMP3 tanpa GUI (`host/sump3_client.py`) + CLI capture langsung ke `.sr`.
+2. **Fase 2**: bridge yang meniru perangkat *OLS/SUMP*, sehingga PulseView resmi bisa
+   mengontrol SUMP3 (Windows: lewat COM virtual com0com).
+3. **Fase 3** (opsional): driver libsigrok native `sump3`.
+4. **Fase 4** (opsional): Ethernet, kedalaman RLE lebih besar, channel tambahan, 200 MHz.
 
 ## Lisensi
 
