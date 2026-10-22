@@ -1,6 +1,6 @@
 /* ****************************************************************************
 -- Source file: tb_la_top.v
--- Description: Smoke test for la_top. Acts like bd_server.py over the UART:
+-- Description: Smoke test for la_top ( or la_top_s9 with -DS9 ). Acts like bd_server.py over the UART:
 --   1) Sends "\n" so mesa_uart autobauds ( 921600 baud )
 --   2) MesaBus write  0x98 <= 0x0000000B   ( SUMP3 cmd_rd_hw_id_rev )
 --   3) MesaBus read   0x9C                 ( expect 0x53 "S3" in [31:24] )
@@ -30,6 +30,19 @@ module tb_la_top;
 
   always #( CLK_PERIOD / 2.0 ) sys_clk = ~sys_clk;
 
+`ifdef S9
+  // Antminer S9 top : clock from the PS stub, test pattern via J9 jumper
+  wire [3:0] led_n;
+  assign led = ~led_n;
+  la_top_s9 u_dut
+  (
+    .probe    ( probe     ),
+    .tp_sel_n ( ~sw[0]    ),
+    .bd_rx    ( bd_rx     ),
+    .bd_tx    ( bd_tx     ),
+    .led_n    ( led_n     )
+  );
+`else
   la_top u_dut
   (
     .sys_clk ( sys_clk ),
@@ -40,6 +53,7 @@ module tb_la_top;
     .bd_tx   ( bd_tx   ),
     .led     ( led     )
   );
+`endif
 
   task uart_send_byte ( input [7:0] b );
     integer i;
@@ -75,7 +89,7 @@ module tb_la_top;
   end
 
   // Decode the internal test pattern UART ( pattern[0] -> pod0 bit 0 )
-  wire tp_uart = u_dut.u_la_test_pattern.pattern[0];
+  wire tp_uart = u_dut.u_la_core.u_la_test_pattern.pattern[0];
   reg  [8*32-1:0] tp_str = 0;
   integer         tp_len = 0;
   always begin : proc_tp_rx

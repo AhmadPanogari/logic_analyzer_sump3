@@ -54,3 +54,12 @@ set_property -dict { PACKAGE_PIN U12 IOSTANDARD LVCMOS33 } [get_ports bd_tx]
 
 set_property CFGBVS VCCO [current_design]
 set_property CONFIG_VOLTAGE 3.3 [current_design]
+
+## Timing
+## 125 MHz PL oscillator. The MMCM output clock (100 MHz) is derived automatically.
+create_clock -period 8.000 -name sys_clk [get_ports sys_clk]
+set_input_jitter sys_clk 0.200
+
+## All other I/O is asynchronous and goes through 2-FF synchronizers in la_core.v
+set_false_path -from [get_ports {probe[*] btn[*] sw[*] bd_rx}]
+set_false_path -to   [get_ports {bd_tx led[*]}]

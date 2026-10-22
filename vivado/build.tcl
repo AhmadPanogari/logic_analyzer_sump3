@@ -1,16 +1,23 @@
 # -----------------------------------------------------------------------------
-# Non-project Vivado build for the XC7Z010 SUMP3 Logic Analyzer.
+# Vivado batch build for the XC7Z010 SUMP3 Logic Analyzer.
 #
 #   cd vivado
+#   vivado -mode batch -source build.tcl -tclargs antminer_s9
 #   vivado -mode batch -source build.tcl -tclargs zybo_z7_10
 #   vivado -mode batch -source build.tcl -tclargs arty_z7_10
 #
-# Output: vivado/build_<board>/la_top.bit  + reports
-# The board name selects ../constraints/<board>.xdc
+# Output in vivado/build_<board>/ :
+#   la_top.bit      JTAG ( Vivado Hardware Manager )
+#   la_top.bit.bin  Linux FPGA manager ( byte swapped, like bootgen -process_bitstream )
+#   la_top.xsa      Hardware platform ( antminer_s9 only, for an FSBL / ps7_init )
+#   *.rpt           Timing, utilization and I/O reports
+#
+# Board selects ../constraints/<board>.xdc and the top level:
+#   antminer_s9           -> la_top_s9 ( clock = PS FCLK_CLK0, needs a PS7 block design )
+#   zybo_z7_10/arty_z7_10 -> la_top    ( clock = 125 MHz PL oscillator, PL only )
 # -----------------------------------------------------------------------------
-set board  [expr { [llength $argv] > 0 ? [lindex $argv 0] : "zybo_z7_10" }]
+set board  [expr { [llength $argv] > 0 ? [lindex $argv 0] : "antminer_s9" }]
 set part   xc7z010clg400-1
-set top    la_top
 
 set script_dir [file normalize [file dirname [info script]]]
 set root       [file normalize "$script_dir/.."]
@@ -25,7 +32,24 @@ if { ![file exists "$root/third_party/sump3/verilog/sump3_core.v"] } {
   puts "ERROR: third_party submodules missing. Run: git submodule update --init"
   exit 1
 }
+proc find_file { dir name } {
+  foreach f [glob -nocomplain -directory $dir -types f $name] { return $f }
+  foreach d [glob -nocomplain -directory $dir -types d *] {
+    set f [find_file $d $name]
+    if { $f ne "" } { return $f }
+  }
+  return ""
+}
+
+set use_ps [expr { $board eq "antminer_s9" }]
+set top    [expr { $use_ps ? "la_top_s9" : "la_top" }]
+
+file delete -force $out_dir
 file mkdir $out_dir
+
+# An in-memory project is needed for the PS7 block design ( IP generation )
+create_project -in_memory -part $part
+set_property target_language Verilog [current_project]
 
 # MesaBus mesa_id reports a 32bit UNIX build timestamp from module time_stamp
 set ts [clock seconds]
@@ -36,13 +60,54 @@ puts $fh "// [clock format $ts]"
 puts $fh "endmodule"
 close $fh
 
-set_part $part
+# -----------------------------------------------------------------------------
+# PS7 block design: only FCLK_CLK0 = 100 MHz is used by the PL.
+# -----------------------------------------------------------------------------
+if { $use_ps } {
+  create_bd_design -dir $out_dir la_ps
+  set ps7 [create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:5.5 ps7]
+  set_property -dict [list \
+    CONFIG.PCW_USE_M_AXI_GP0             {0}   \
+    CONFIG.PCW_EN_CLK0_PORT              {1}   \
+    CONFIG.PCW_EN_RST0_PORT              {1}   \
+    CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ  {100} \
+    CONFIG.PCW_UART1_PERIPHERAL_ENABLE   {1}   \
+    CONFIG.PCW_UART1_UART1_IO            {MIO 48 .. 49} \
+  ] $ps7
+
+  create_bd_intf_port -mode Master -vlnv xilinx.com:interface:ddrx_rtl:1.0 DDR
+  create_bd_intf_port -mode Master -vlnv xilinx.com:display_processing_system7:fixedio_rtl:1.0 FIXED_IO
+  create_bd_port -dir O -type clk FCLK_CLK0
+  create_bd_port -dir O -type rst FCLK_RESET0_N
+  connect_bd_intf_net [get_bd_intf_ports DDR]      [get_bd_intf_pins ps7/DDR]
+  connect_bd_intf_net [get_bd_intf_ports FIXED_IO] [get_bd_intf_pins ps7/FIXED_IO]
+  connect_bd_net      [get_bd_ports FCLK_CLK0]     [get_bd_pins ps7/FCLK_CLK0]
+  connect_bd_net      [get_bd_ports FCLK_RESET0_N] [get_bd_pins ps7/FCLK_RESET0_N]
+
+  validate_bd_design
+  save_bd_design
+  set bd_file [get_files la_ps.bd]
+  set_property synth_checkpoint_mode None $bd_file
+  generate_target all $bd_file
+  make_wrapper -files $bd_file -top
+  set wrapper [find_file $out_dir la_ps_wrapper.v]
+  if { $wrapper eq "" } {
+    puts "ERROR: la_ps_wrapper.v was not generated"
+    exit 1
+  }
+  read_verilog $wrapper
+}
 
 # Project RTL
-read_verilog "$root/rtl/la_top.v"
-read_verilog "$root/rtl/la_clk_gen.v"
+read_verilog "$root/rtl/la_core.v"
 read_verilog "$root/rtl/la_sump3.v"
 read_verilog "$root/rtl/la_test_pattern.v"
+if { $use_ps } {
+  read_verilog "$root/rtl/la_top_s9.v"
+} else {
+  read_verilog "$root/rtl/la_top.v"
+  read_verilog "$root/rtl/la_clk_gen.v"
+}
 read_verilog "$out_dir/time_stamp.v"
 
 # SUMP3 IP ( https://github.com/blackmesalabs/sump3 )
@@ -58,7 +123,6 @@ foreach f { ft232_xface mesa_uart_phy mesa_uart mesa_tx_uart mesa_byte2ascii
   read_verilog "$mb/$f.v"
 }
 
-read_xdc "$root/constraints/timing.xdc"
 read_xdc $board_xdc
 
 synth_design -top $top -part $part
@@ -73,12 +137,30 @@ report_timing_summary -file "$out_dir/post_route_timing_summary.rpt"
 report_utilization    -file "$out_dir/post_route_util.rpt"
 report_io             -file "$out_dir/post_route_io.rpt"
 
-write_bitstream -force "$out_dir/$top.bit"
+write_bitstream -force -bin_file "$out_dir/la_top.bit"
+
+# Linux zynq FPGA manager wants each 32 bit word byte swapped ( *.bit.bin )
+if { [file exists "$out_dir/la_top.bin"] } {
+  set fi [open "$out_dir/la_top.bin" rb]
+  set raw [read $fi]
+  close $fi
+  binary scan $raw i* words
+  set fo [open "$out_dir/la_top.bit.bin" wb]
+  puts -nonewline $fo [binary format I* $words]
+  close $fo
+}
+
+if { $use_ps } {
+  if { [catch { write_hw_platform -fixed -force -file "$out_dir/la_top.xsa" } err] } {
+    puts "NOTE: write_hw_platform skipped ( $err )"
+  }
+}
 
 set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
 puts "======================================================================"
-puts " Board      : $board ( $part )"
-puts " Bitstream  : $out_dir/$top.bit"
+puts " Board      : $board ( $part ), top = $top"
+puts " Bitstream  : $out_dir/la_top.bit"
+puts " Linux      : $out_dir/la_top.bit.bin"
 puts " Setup WNS  : $wns ns"
 puts "======================================================================"
 if { $wns < 0 } {
