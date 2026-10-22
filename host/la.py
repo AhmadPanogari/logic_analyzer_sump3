@@ -65,7 +65,7 @@ def check_submodules():
   for f in (SUMP3_PY, BD_SERVER):
     if not os.path.isfile(f):
       sys.exit("ERROR: %s not found.\n"
-               "       Run: git submodule update --init --recursive" % f)
+               "       Run: python fetch_third_party.py   ( from the repo root )" % f)
 
 
 def update_ini(path, forced):

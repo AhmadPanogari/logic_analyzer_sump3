@@ -47,16 +47,22 @@ Di PulseView semua protocol decoder (UART, SPI, I2C, dll.) bisa langsung dipakai
 | `host/sump3_vcd2sr.py` | Konverter VCD SUMP3 → sigrok `.sr` + buka PulseView |
 | `host/s9_load_bitstream.sh` | Dijalankan di Linux board S9: muat bitstream lewat FPGA manager |
 | `sim/` | Testbench Icarus Verilog (MesaBus UART → baca HW ID SUMP3) |
+| `fetch_third_party.py` | Mengisi `third_party/` (git submodule, atau unduh ZIP jika tanpa git) |
 | `third_party/sump3` | Submodule [blackmesalabs/sump3](https://github.com/blackmesalabs/sump3) |
 | `third_party/MesaBusProtocol` | Submodule [blackmesalabs/MesaBusProtocol](https://github.com/blackmesalabs/MesaBusProtocol) |
 
-Clone dengan submodule:
+Source SUMP3 dan MesaBus adalah **git submodule**. Ambil dengan salah satu cara:
 
 ```sh
 git clone --recursive https://github.com/AhmadPanogari/logic_analyzer_sump3
-# atau, jika sudah ter-clone:
-git submodule update --init --recursive
+# atau, jika sudah ter-clone / diunduh sebagai ZIP:
+python fetch_third_party.py
 ```
+
+> Unduhan **"Download ZIP"** dari GitHub tidak menyertakan isi submodule, sehingga
+> `third_party/` kosong dan build berhenti dengan `third_party submodules missing`.
+> `fetch_third_party.py` menjalankan `git submodule update` jika ada git, atau mengunduh
+> commit yang dipatok dari GitHub (cukup Python, tanpa git).
 
 ## Spesifikasi
 
@@ -371,6 +377,7 @@ men-decode UART pola uji (`Hello SUMP3 PulseView`).
 
 | Gejala | Cek |
 |---|---|
+| Build: `third_party submodules missing` | Repo diunduh sebagai ZIP → jalankan `python fetch_third_party.py` di root repo |
 | `Invalid Hardware ID` di sump3.py | TX/RX tertukar? GND tersambung? Port/baud bd_server benar? LED UART RX (S9: D8, Zybo/Arty: `led[3]`) berkedip saat connect? |
 | S9: LED heartbeat tidak berkedip | FCLK0 tidak jalan. JTAG: lihat output `s9_jtag_load.tcl` (FCLK0, `LVL_SHFTR_EN`). Linux: cek `cat /sys/class/fpga_manager/fpga0/state` = `operating` |
 | S9: XSCT tidak menemukan target `APU` / `A9` | Jumper boot bukan Cascade JTAG, VREF/kabel J10, atau Vivado Hardware Manager masih memegang kabel |

@@ -30,7 +30,10 @@ if { ![file exists $board_xdc] } {
   exit 1
 }
 if { ![file exists "$root/third_party/sump3/verilog/sump3_core.v"] } {
-  puts "ERROR: third_party submodules missing. Run: git submodule update --init"
+  puts "ERROR: third_party/ is empty ( SUMP3 + MesaBus sources are git submodules,"
+  puts "       a GitHub \"Download ZIP\" does not include them ). From the repo root run:"
+  puts "         python fetch_third_party.py"
+  puts "       or, in a git clone: git submodule update --init --recursive"
   exit 1
 }
 proc find_file { dir name } {
