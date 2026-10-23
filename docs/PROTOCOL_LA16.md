@@ -67,9 +67,9 @@ Semua frame, dua arah:
 | Offset | Tipe | Isi |
 |---|---|---|
 | 0 | u8 | mode: 0 = buffer (v0). 1 = streaming mentah, 2 = streaming RLE (cadangan) |
-| 1 | u8 | cadangan (0) |
+| 1 | u8 | format upload: 0 = mentah, 1 = RLE, 2 = otomatis (perangkat memilih yang lebih kecil per blok) |
 | 2 | u16 | channel aktif (bit per channel). v0 selalu mengirim 16 bit per sampel |
-| 4 | u32 | divider: samplerate = 100 MHz / (divider + 1) |
+| 4 | u32 | divider: samplerate = clock dasar / (divider + 1). Clock dasar dari `IDENT` (S9 sekarang 100 MHz, target 200 MS/s) |
 | 8 | u32 | jumlah sampel total |
 | 12 | u32 | jumlah sampel pra-trigger (≤ total) |
 | 16 | u16 | trigger level: mask |
@@ -88,10 +88,11 @@ mask naik berubah 0→1, channel di mask turun berubah 1→0. Channel di kedua m
 
 | type | Nama | Payload |
 |---|---|---|
-| 0x81 | `IDENT` | u8 versi protokol (1), u8 jumlah channel (16), u32 clock dasar (100000000), u32 sampel maks., u16 fitur (bit0 trigger tepi, bit1 streaming mentah, bit2 streaming RLE), lalu string ASCII `vendor\0model\0versi\0` |
+| 0x81 | `IDENT` | u8 versi protokol (1), u8 jumlah channel (16), u32 clock dasar (100000000 atau 200000000), u32 sampel maks. (BRAM 64K, DDR ratusan juta), u16 fitur (bit0 trigger tepi, bit1 streaming mentah, bit2 streaming RLE), lalu string ASCII `vendor\0model\0versi\0` |
 | 0x82 | `ACK` | u8 type perintah yang dijawab |
 | 0x83 | `STATUS` | u8 state, u32 sampel tertangkap, u32 total. Dikirim tiap ±50 ms selama armed, dan setiap kali state berubah |
 | 0x84 | `DATA` | u32 indeks sampel pertama, lalu N × u16 sampel (N ≤ 256), **terlama dulu** |
+| 0x87 | `DATA_RLE` | u32 indeks sampel pertama, lalu N × (u16 nilai, u16 jumlah−1), **terlama dulu**. Driver mengurainya menjadi sampel biasa |
 | 0x85 | `TRIGGER` | u32 indeks sampel trigger. Dikirim sebelum `DATA` pertama |
 | 0x86 | `END` | u32 jumlah sampel terkirim, u8 flag (bit0 overflow, bit1 aborted, bit2 timeout) |
 | 0x8F | `ERROR` | u8 kode (1 CRC, 2 type tak dikenal, 3 config tidak valid, 4 sibuk) |
@@ -106,6 +107,19 @@ host: CONFIG ─► ACK
 host: ARM    ─► ACK, STATUS(1) … STATUS(2) … STATUS(3)
                 STATUS(4), TRIGGER(idx), DATA, DATA, …, END
 ```
+
+## Memory depth dan streaming (ringkasan)
+
+Detail dan angka ada di `docs/PRODUCT_PLAN.md` (3c, 5c, 5d).
+
+* Penyimpanan: BRAM (S9: 64K mentah, ±32K–56K event RLE), DDR3 (S9: 256–512 MB perlu
+  dicek; produk: 128 MB = 1 Gbit).
+* Upload adalah hambatan di S9: UART 921600 ±90 KB/s, 12 Mbaud (FCLK1 96 MHz) ±1,2 MB/s.
+  RLE (`DATA_RLE`) membuat capture panjang praktis untuk sinyal yang jarang berubah.
+* 200 MS/s: pin dicuplik IDDR di kedua tepi clock 100 MHz. Engine memproses 2 sampel per
+  clock (32 bit), indeks sampel tetap per sampel.
+* Streaming (mode 1/2, nanti): dibatasi link dan RAM PC. libsigrok/PulseView menyimpan
+  sampel mentah, sehingga RAM = samplerate × 2 byte/s.
 
 ## Driver libsigrok
 
@@ -126,8 +140,10 @@ host: ARM    ─► ACK, STATUS(1) … STATUS(2) … STATUS(3)
 | Langkah | Isi | Verifikasi |
 |---|---|---|
 | 1 | Spesifikasi ini | Ditinjau |
-| 2 | RTL `rtl/la16/`: parser frame + CRC, engine capture (BRAM 64K, divider, trigger level/tepi, pra-trigger, upload terlama dulu, status periodik). Bitstream `antminer_s9_la16`. Engine OLS tetap ada | cocotb: model host Python ⇄ RTL |
+| 2 | RTL `rtl/la16/`: parser frame + CRC, engine capture (BRAM 64K, divider, trigger level/tepi, pra-trigger, upload terlama dulu, status periodik, **2 sampel per clock / 200 MS/s**). Bitstream `antminer_s9_la16`. Engine OLS tetap ada | cocotb: model host Python ⇄ RTL |
 | 3 | Driver libsigrok `la16` | Co-sim: sigrok-cli dan `ols_multirun`-style ⇄ TCP ⇄ RTL (infrastruktur `sim/ols`) |
 | 4 | Workflow CI membangun PulseView dengan patch OLS + driver `la16` | Installer dari Actions |
 | 5 | Uji di board S9 | Run berulang, trigger tepi, Stop saat menunggu, gelombang bertahap |
-| 6 | (Produk P2) mode streaming mentah dan RLE, transport USB sync FIFO | — |
+| 6 | RLE di BRAM + `DATA_RLE` | Co-sim + board |
+| 7 | Buffer DDR3 S9 lewat AXI HP (setelah chip DDR S9 diketahui), UART 12 Mbaud | Board |
+| 8 | (Produk P2, Tang Primer 20K + FT232H) mode streaming mentah dan RLE, transport USB sync FIFO | — |
