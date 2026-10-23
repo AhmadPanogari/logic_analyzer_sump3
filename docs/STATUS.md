@@ -37,12 +37,12 @@ Prototipe: board kontrol Antminer S9 bekas (Zynq XC7Z010-1CLG400, DDR3L 512 MB,
 | `antminer_s9_la16ddr` (ring DDR lewat HP0, maks. 251.658.240 sampel) | ✅ board: 1M @200 MS/s, 4M @1 MS/s benar |
 | `antminer_s9_la16eth` bitstream (HP0 + GP0 register `la16_regs.v` @0x43C00000, TTC0) | ✅ build 2024.2, WNS 0,311 ns |
 | Server ARM `sw/la16_eth/la16_server.c` (lwIP RAW, TCP 5555) | ✅ uji host (`sw/la16_eth/test/`) |
-| `la16_eth.elf` lewat `vitis_build.py` (Vitis 2024.2, workspace `D:\la16ws`) | ✅ build 24-10-2026, belum diuji di board |
+| `la16_eth.elf` lewat `vitis_build.py` (Vitis 2024.2, workspace `D:\la16ws`) | ✅ build 24-10-2026 |
+| Ethernet S9: link + `ping 192.168.1.10` dari laptop (kabel langsung) | ✅ board 24-10-2026 |
 
 ## Sedang dikerjakan
 
-Uji Ethernet di board dengan `vivado\build_antminer_s9_la16eth\la16_eth.elf` (langkah 1 di
-bawah). Build ulang dari nol:
+Uji PulseView lewat Ethernet (langkah 1 di bawah). Build ulang dari nol:
 
 ```
 cd vivado
@@ -70,6 +70,12 @@ Masalah build yang sudah diatasi:
 11. Vitis server tertinggal mengunci `D:\la16ws\_ide\.wsdata\.lock` setelah build gagal →
     skrip sekarang memanggil `vitis.dispose()` sebelum keluar. Kalau masih terkunci: tutup
     proses `java.exe` (RigelApp) milik Vitis.
+12. Board: laptop "Media disconnected" setelah ELF jalan (tanpa program link normal). PHY S9
+    adalah BCM54612E; lwIP memakai kode Marvell, hanya mengiklankan 1000, dan cek link-nya
+    (tiap 1 s) me-reset PHY setiap kali link naik. `sw/la16_eth/s9_phy.c` mengambil alih PHY:
+    lwIP link check dimatikan, reset sekali, delay RGMII RX/TX tetap aktif (`rgmii-id`),
+    autonegosiasi 10/100/1000, kecepatan GEM + clock GEM0 mengikuti link. Setelah ELF lama
+    jalan, PHY baru pulih dengan cabut daya 12 V (tidak ada jalur reset PHY dari Zynq).
 
 Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform\export\...`):
 `TCP_WND 16384`, `TCP_SND_BUF 32768`, `MEM_SIZE 262144`, `PBUF_POOL_SIZE 2048`, `LWIP_DHCP 0`,
@@ -78,9 +84,11 @@ Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform
 
 ## Langkah berikutnya
 
-1. Uji Ethernet di board:
+1. Uji Ethernet di board (link + ping ✅):
    * `s9_jtag_load.bat build_antminer_s9_la16eth` (init MIO + DDR, bitstream, `dow` ELF, `con`).
-   * Laptop 192.168.1.2/24 di port Gigabit, `ping 192.168.1.10`.
+   * Laptop 192.168.1.2/24, tanpa gateway, `ping 192.168.1.10`.
+   * Log program di UART konsol PS J12 (MIO 48/49, 115200), bukan J1. Level J12 belum diukur
+     (bank MIO 1 = 1,8 V).
    * PulseView (installer run 39973273719): driver `la16`, Network / Raw TCP
      `192.168.1.10:5555`. Uji capture kecil, lalu besar (puluhan–ratusan juta sampel), ukur
      kecepatan upload.
@@ -91,8 +99,8 @@ Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform
 
 ## Catatan teknis penting
 
-* IP statis 192.168.1.10 (opsi `--ip` di `vitis_build.py`). PHY di alamat MDIO 1, ID
-  0362/5e62 (Broadcom). lwIP memakai `CONFIG_LINKSPEED1000` (hanya register IEEE).
+* IP statis 192.168.1.10 (opsi `--ip` di `vitis_build.py`). PHY BCM54612E di alamat MDIO 1,
+  ID 0362/5e62, disetup oleh `s9_phy.c` (bukan kode PHY lwIP).
 * `tcp-raw` di libsigrok upstream tidak punya drain → driver `la16` menganggap `SR_ERR_NA` OK.
 * Konfigurasi DDR preset Vivado merusak data di S9: selalu pakai `s9_ddr_init.tcl`.
 * Simulasi: `sim/la16/` (cocotb + Icarus): `make`, `make USE_DDR=1`, `run_cosim.sh`,
