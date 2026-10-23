@@ -559,7 +559,7 @@ board S9:
 | **115200, Log level default**, 50K @1 MHz | **Berhasil** pada Run pertama |
 | Run kedua / ganti jumlah sampel | Gagal: `serial-libsp: Read error (995)` (operasi baca yang dibatalkan, bug libserialport lama) |
 | PulseView **nightly**, 115200 | Run pertama berhasil (64K, 11,8 s). Run berikutnya selesai dalam 0,00–0,13 s **tanpa data** |
-| **PulseView ber-patch** (`pulseview-ols-*-installer.exe`, lihat di bawah) | **Run berulang berhasil tanpa Connect ulang** (diuji di board S9) |
+| **PulseView ber-patch** (`pulseview-ols-*-installer.exe`, lihat di bawah) | **Run berulang berhasil tanpa Connect ulang, di 115200 maupun 921600** (diuji di board S9) |
 
 Penyebab gagal pada Run berikutnya ada di driver OLS libsigrok (semua versi), bukan di
 board. Di Windows, event RX port serial masih "menyala" sisa Run sebelumnya, sehingga
@@ -601,7 +601,8 @@ berubah), sehingga terlihat apakah masalahnya di board atau di PulseView.
 1. **Connect to a Device** (ikon perangkat di toolbar):
    * Driver: **Openbench Logic Sniffer & SUMP compatibles**
    * Interface: **Serial Port**, pilih port COM channel B CJMCU, baud rate **sama dengan
-     jumper J9** (disarankan 230400 atau 115200 untuk PulseView 0.4.2, lihat tabel di atas)
+     jumper J9** (PulseView ber-patch: **921600**, jumper terbuka; PulseView resmi: 115200, lihat
+     tabel di atas)
    * **Scan for devices** → muncul *AntMiner S9 LA … with 16 channels* → OK
 2. Atur **jumlah sampel** (maks. 65536) dan **samplerate** (maks. 100 MHz) di toolbar.
 3. **Trigger** (opsional): klik nama channel, lalu pilih kondisi **0** atau **1**. OLS hanya
@@ -640,7 +641,8 @@ UART/I2C lambat, turunkan samplerate agar durasi lebih panjang, misalnya 1 MHz =
 * Di board S9: `ols-capture` 64K sampel @921600 berhasil dan file `.sr`-nya terbuka di
   PulseView. PulseView 0.4.2 Run langsung berhasil untuk 5K sampel @921600, gagal mulai
   10K (byte hilang di driver). Pemilih baud lewat jumper ditambahkan untuk mengatasinya
-  (diuji di simulasi pada 921600 dan 115200; belum diuji di board).
+  (diuji di board pada 115200 dan 921600). Dengan PulseView ber-patch, Run berulang
+  berhasil di board pada 115200 dan 921600 tanpa Connect ulang.
 
 ## Menambah / mengganti sinyal
 
