@@ -11,7 +11,9 @@
 # Board DDR: 2x Samsung K4B2G1646F-BYMA ( DDR3L 2 Gbit x16 ) = 32 bit, 512 MB,
 # CPU address 0x00000000 .. 0x1FFFFFFF ( the first 1 MB is skipped: OCM ).
 #
-# Steps: system reset, PLL + clock + DDR init from ps7_init.tcl, then
+# Steps: system reset, MIO + PLL + clock + DDR init from ps7_init.tcl ( the
+# order of ps7_init; the MIO part also sets up the DDR I/O buffers ( DDRIOB )
+# and runs the DCI calibration, without it DDR accesses hang ), then
 #   1) DDR controller status
 #   2) data bus walking ones ( 32 bit )
 #   3) address bus ( aliasing between all power of two offsets, finds missing
@@ -63,7 +65,11 @@ if { [llength [info procs ps7_ddr_init_data_$sfx]] == 0 } {
   puts "ERROR: ps7_ddr_init_data_$sfx missing in $init ( DDR disabled in the PS7 block? )"
   exit 1
 }
-puts "Zynq silicon $si_ver : PLL, clock and DDR init"
+puts "Zynq silicon $si_ver : MIO ( incl. DDR I/O + DCI ), PLL, clock and DDR init"
+if { [catch { ps7_mio_init_data_$sfx } err] } {
+  puts "ERROR: MIO / DDR I/O init failed: $err"
+  exit 1
+}
 ps7_pll_init_data_$sfx
 ps7_clock_init_data_$sfx
 if { [catch { ps7_ddr_init_data_$sfx } err] } {
@@ -81,8 +87,26 @@ proc check { name ok detail } {
     puts [format "  FAIL  %s : %s" $name $detail]
   }
 }
-proc rd  { a }   { return [mrd -force -value $a] }
-proc wr  { a v } { mwr -force $a $v }
+# A DDR access that never completes stalls the CPU and xsdb reports a timeout.
+# Turn that into a clear FAIL and stop instead of a Tcl traceback.
+proc bus_error { what a err } {
+  global fails
+  incr fails
+  puts [format "  FAIL  %s at 0x%08X does not complete ( bus hang )" $what $a]
+  puts "        $err"
+  puts "======================================================================"
+  puts " DDR FAILED: accesses hang. Send this output."
+  puts "======================================================================"
+  catch { disconnect }
+  exit 1
+}
+proc rd  { a } {
+  if { [catch { mrd -force -value $a } r] } { bus_error "read" $a $r }
+  return $r
+}
+proc wr  { a v } {
+  if { [catch { mwr -force $a $v } r] } { bus_error "write" $a $r }
+}
 
 # 1) Controller status: DDRC mode_sts_reg bits 2..0 = 1 is normal operation
 set sts [rd 0xF8006054]
@@ -144,8 +168,8 @@ foreach a $places {
     lappend vals [expr { $seed ^ ($a + $i * 4) }]
   }
   set t0 [clock milliseconds]
-  mwr -force $a $vals $block_words
-  set got [mrd -force -value $a $block_words]
+  if { [catch { mwr -force $a $vals $block_words } r] } { bus_error "block write" $a $r }
+  if { [catch { mrd -force -value $a $block_words } got] } { bus_error "block read" $a $got }
   set ms [expr { [clock milliseconds] - $t0 }]
   set nbad 0
   set first ""
