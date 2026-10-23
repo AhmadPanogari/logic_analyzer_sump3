@@ -422,6 +422,8 @@ menghubungi BlackMesaLabs.
 - [x] Driver dan protokol sendiri (bukan OLS) untuk status capture, upload bertahap, trigger
       tepi, lalu streaming: rancangan v0 di `docs/PROTOCOL_LA16.md`, mulai di board S9 lewat UART
 - [x] Target spesifikasi: **kalahkan Kingst LA2016** (3c); kelas USB 3 (Sipeed) bukan target v1
-- [ ] Cek: chip DDR S9, harga LA2016 dan Tang Primer 20K di marketplace Indonesia
+- [x] Chip DDR S9: 2× K4B2G1646F (DDR3L 2 Gbit x16) = 512 MB, 32 bit. **Lolos tes di board** dengan
+      nilai register U-Boot S9 (`vivado/s9_ddr_init.tcl`, `s9_ddr_test.tcl`)
+- [x] Harga di Indonesia: Kingst LA2016 Rp 4,5–5 juta, Tang Primer 20K Rp 1,5–2 juta
 - [ ] Pilihan FPGA dan USB bridge (setelah P2; kandidat Tang Primer 20K + FT232H)
 - [ ] Model distribusi: open hardware penuh, atau hardware terbuka + produk jadi berbayar

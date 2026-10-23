@@ -679,6 +679,9 @@ vivado -mode batch -source build.tcl -tclargs antminer_s9_ols    # build ulang: 
 s9_ddr_test.bat
 ```
 
+**Hasil di board (23-10-2026): semua PASS**: controller normal, bus data, 27 jalur alamat,
+dan 8 blok acak di seluruh 512 MB (DDR 32 bit, 533 MHz).
+
 Argumen adalah folder build yang berisi `ps7_init.tcl` (default `build_antminer_s9_ols`).
 Hasil yang diharapkan: semua `PASS` dan `DDR OK: 512 MB, 32 bit, 533 MHz`. Setelah tes,
 muat bitstream seperti biasa dengan `s9_jtag_load`.
