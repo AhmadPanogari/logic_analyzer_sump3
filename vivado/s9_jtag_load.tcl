@@ -6,7 +6,7 @@
 #   xsct vivado/s9_jtag_load.tcl <build_dir>
 #
 # Board: boot jumpers JP1..JP4 all at 0 ( "Cascade JTAG" ), Xilinx/Digilent
-# JTAG cable on J10, 12 V on. Close the Vivado Hardware Manager first ( only
+# JTAG cable ( or an FT2232H programmed with program_ftdi ) on J10, 12 V on. Close the Vivado Hardware Manager first ( only
 # one program can own the cable ).
 #
 # The S9 PL has no oscillator. Its 100 MHz clock is FCLK_CLK0 from the PS, and
@@ -36,8 +36,25 @@ foreach f [list $bit $init] {
 }
 
 connect
+
+# Optional: slower TCK for long jumper wires / generic FT2232H boards
+#   set S9_JTAG_HZ=1000000   ( Windows )   or   S9_JTAG_HZ=1000000 xsdb ... ( Linux )
+if { [info exists ::env(S9_JTAG_HZ)] } {
+  if { [catch { jtag targets -set -filter {level == 0}
+                jtag frequency $::env(S9_JTAG_HZ)
+                puts "JTAG TCK: [jtag frequency] Hz" } err] } {
+    puts "NOTE: could not set JTAG frequency ( $err )"
+  }
+}
+
 puts "JTAG targets:"
 puts [targets]
+if { [llength [targets -filter {name =~ "APU*"}]] == 0 } {
+  puts "ERROR: no Zynq APU target. Check: JTAG cable recognized by hw_server"
+  puts "       ( generic FT2232H needs program_ftdi, see README ), wiring on J10,"
+  puts "       12 V on, boot jumpers JP1..JP4 = 0, Vivado Hardware Manager closed."
+  exit 1
+}
 
 # 1) System reset, then configure the PL
 targets -set -nocase -filter {name =~ "APU*"}

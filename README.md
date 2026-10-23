@@ -208,6 +208,65 @@ Cara paling sederhana untuk verifikasi. Yang dibutuhkan:
   Xilinx SDK). Vivado Hardware Manager saja tidak cukup, karena tidak bisa menjalankan
   inisialisasi PS. Launcher memakai `xsct` jika ada di PATH, jika tidak `xsdb`.
 
+#### Memakai FT2232H generik (mis. modul CJMCU-2232HL)
+
+`hw_server` (dipakai Vivado/XSDB) hanya mengenali kabel Xilinx/Digilent, atau FTDI yang
+EEPROM-nya sudah diprogram dengan utilitas Vivado **`program_ftdi`**. Setelah diprogram,
+**channel A** menjadi JTAG dan **channel B tetap UART** (COM port). Artinya satu modul
+CJMCU bisa sekaligus menjadi JTAG dan adapter UART MesaBus.
+
+1. **Pastikan modul punya EEPROM** (IC 8 pin 93C46/93C56/93C66 di dekat FT2232H). Tanpa
+   EEPROM, `program_ftdi` tidak bisa dipakai.
+2. **Driver**: pakai driver FTDI resmi (CDM/D2XX, biasanya otomatis dari Windows Update).
+   Jika modul pernah di-*Zadig* ke WinUSB/libusb (untuk OpenOCD), kembalikan ke driver
+   FTDI lewat Device Manager.
+3. **Tulis EEPROM** (tutup dulu Vivado/hw_server, hanya colok satu FTDI):
+
+   ```powershell
+   D:\Xilinx\2025.2\Vivado\bin\program_ftdi.bat -write -ftdi=FT2232H -serial=S9JTAG01 -vendor="CJMCU" -board="AntminerS9" -desc="FT2232H JTAG"
+   D:\Xilinx\2025.2\Vivado\bin\program_ftdi.bat -read
+   ```
+
+   Cabut-colok modul. Isi EEPROM lama tertimpa; kalau ingin dikembalikan, bisa memakai
+   FT_PROG dari FTDI. (Ada laporan `program_ftdi` bermasalah di Vivado 2024.1; jika 2025.2
+   gagal, coba dari instalasi 2023.2.)
+4. **Wiring JTAG** CJMCU (channel A, pin ADBUS) ke **J10** S9:
+
+   | CJMCU (FT2232H) | Sinyal | J10 S9 |
+   |---|---|---|
+   | AD0 (ADBUS0) | TCK | pin 6 |
+   | AD1 (ADBUS1) | TDI | pin 10 |
+   | AD2 (ADBUS2) | TDO | pin 8 |
+   | AD3 (ADBUS3) | TMS | pin 4 |
+   | GND | GND | pin 1/3/5/... (ganjil) |
+   | — | VREF 3,3 V | pin 2 (jangan disambung ke 3V3 CJMCU; cukup untuk cek tegangan) |
+   | — | SRST | pin 14 (biarkan) |
+
+   I/O FT2232H di modul ini 3,3 V, cocok dengan JTAG S9 (3,3 V). Pakai kabel sependek
+   mungkin; resistor seri 33–100 Ω di TCK/TMS/TDI membantu bila sinyal tidak stabil.
+5. **Wiring UART MesaBus** (channel B) ke **J1** S9:
+
+   | CJMCU (FT2232H) | Sinyal | J1 S9 |
+   |---|---|---|
+   | BD0 (BDBUS0) | TXD (keluar dari FTDI) | pin 12 (`bd_rx`) |
+   | BD1 (BDBUS1) | RXD (masuk ke FTDI) | pin 11 (`bd_tx`) |
+   | GND | GND | pin 1 |
+
+   Port COM channel B inilah yang dipakai di `python host\la.py server --port COMx`.
+6. **Cek**: Vivado Hardware Manager → *Open Target → Auto Connect*. Harus muncul kabel
+   `Xilinx/S9JTAG01` dengan `xc7z010_1` dan `arm_dap_0`. Tutup lagi Hardware Manager
+   sebelum menjalankan skrip XSDB.
+7. Jika JTAG tidak stabil (target hilang / error baca), turunkan TCK:
+
+   ```powershell
+   set S9_JTAG_HZ=1000000
+   D:\Xilinx\2025.2\Vivado\bin\xsdb.bat vivado\s9_jtag_load.tcl
+   ```
+
+Jika `program_ftdi` tidak bisa dipakai (mis. modul tanpa EEPROM), alternatifnya adalah
+OpenOCD (driver `ftdi`, target `zynq_7000.cfg`). Alur OpenOCD untuk S9 **belum** dibuat di
+repo ini.
+
 Langkah:
 
 1. Matikan board. Set jumper boot **JP1..JP4 semua 0 (Cascade JTAG)**.
@@ -384,6 +443,8 @@ men-decode UART pola uji (`Hello SUMP3 PulseView`).
 | `Invalid Hardware ID` di sump3.py | TX/RX tertukar? GND tersambung? Port/baud bd_server benar? LED UART RX (S9: D8, Zybo/Arty: `led[3]`) berkedip saat connect? |
 | S9: LED heartbeat tidak berkedip | FCLK0 tidak jalan. JTAG: lihat output `s9_jtag_load.tcl` (FCLK0, `LVL_SHFTR_EN`). Linux: cek `cat /sys/class/fpga_manager/fpga0/state` = `operating` |
 | S9: XSCT tidak menemukan target `APU` / `A9` | Jumper boot bukan Cascade JTAG, VREF/kabel J10, atau Vivado Hardware Manager masih memegang kabel |
+| FT2232H/CJMCU tidak terdeteksi Vivado/XSDB | EEPROM belum diprogram `program_ftdi`, modul tanpa EEPROM, atau driver WinUSB (Zadig) masih terpasang |
+| JTAG terdeteksi tapi tidak stabil | Kabel terlalu panjang; `set S9_JTAG_HZ=1000000`, tambah resistor seri, cek GND |
 | S9: board reboot setelah load bitstream | Ada program yang masih mengakses desain PL lama lewat AXI → hentikan dulu |
 | S9: waktu di PulseView meleset | FCLK0 bukan 100 MHz; samakan `--samplerate` dengan frekuensi FCLK0 sebenarnya |
 | bd_server tidak bisa buka port | Port dipakai program lain (PuTTY, Vivado serial), nama port salah |
