@@ -213,16 +213,19 @@ src = os.path.join(ws, "la16_eth", "src")
 echo = os.path.join(src, "echo.c")
 if os.path.exists(echo):
     os.remove(echo)
-shutil.copy(os.path.join(here, "la16_server.c"), src)
+# s9_phy.c: Broadcom PHY setup, lwIP's PHY code does not know the S9 PHY
+for f in ("la16_server.c", "s9_phy.c", "s9_phy.h"):
+    shutil.copy(os.path.join(here, f), src)
 # The unified Vitis app lists its sources by name in UserConfig.cmake
 user_cfg = os.path.join(src, "UserConfig.cmake")
 if os.path.exists(user_cfg):
     with open(user_cfg) as f:
         text = f.read()
-    text, n = re.subn(r'"echo\.c"', '"la16_server.c"', text)
+    text, n = re.subn(r'"echo\.c"', '"la16_server.c"\n"s9_phy.c"', text)
     with open(user_cfg, "w") as f:
         f.write(text)
-    print("UserConfig.cmake: echo.c -> la16_server.c ( %d place%s )" % (n, "" if n == 1 else "s"))
+    print("UserConfig.cmake: echo.c -> la16_server.c + s9_phy.c ( %d place%s )"
+          % (n, "" if n == 1 else "s"))
 
 # Static IP of the template's main.c
 main_c = os.path.join(src, "main.c")

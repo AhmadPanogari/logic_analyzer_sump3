@@ -25,6 +25,12 @@
 #endif
 #include "lwip/err.h"
 #include "lwip/tcp.h"
+#ifdef __arm__
+#include "s9_phy.h"
+#else				/* host test ( test/ ): no PHY */
+static void s9_phy_init(void) {}
+static void s9_phy_poll(void) {}
+#endif
 
 #define LA16_TCP_PORT		5555
 
@@ -477,6 +483,7 @@ int start_application(void)
 	ddr_base = reg_rd(R_DDR_BASE);
 	max_samples = reg_rd(R_MAX_SAMPLES);
 	xil_printf("la16: ring at 0x%08x, %d samples\r\n", ddr_base, max_samples);
+	s9_phy_init();
 
 	pcb = tcp_new_ip_type(IPADDR_TYPE_ANY);
 	if (!pcb || tcp_bind(pcb, IP_ANY_TYPE, LA16_TCP_PORT) != ERR_OK)
@@ -489,6 +496,7 @@ int start_application(void)
 
 int transfer_data(void)
 {
+	s9_phy_poll();
 	poll_capture();
 	pump_tx();
 	return 0;
