@@ -135,7 +135,11 @@ if { $use_ps } {
     # Ethernet as on the S9 ( U-Boot board files ): GEM0 RGMII on MIO 16..27,
     # MDIO on MIO 52..53, PHY at address 1. MIO bank 1 ( MIO 16..53 ) is
     # 1.8 V on this board, bank 0 3.3 V. Capture registers on M_AXI_GP0.
+    # TTC0 ( no pins ): the lwIP tick of the Vitis app comes from xiltimer's
+    # interval timer, which needs a TTC ( the SCU timer does not count ).
     set_property -dict [list \
+      CONFIG.PCW_TTC0_PERIPHERAL_ENABLE   {1} \
+      CONFIG.PCW_TTC0_TTC0_IO             {EMIO} \
       CONFIG.PCW_PRESET_BANK0_VOLTAGE     {LVCMOS 3.3V} \
       CONFIG.PCW_PRESET_BANK1_VOLTAGE     {LVCMOS 1.8V} \
       CONFIG.PCW_ENET0_PERIPHERAL_ENABLE  {1} \

@@ -18,7 +18,11 @@
 #include "xil_io.h"
 #include "xil_cache.h"
 #include "xil_printf.h"
+#ifdef SDT
+#include "xiltimer.h"	/* XTime, COUNTS_PER_SECOND in the SDT ( unified Vitis ) BSP */
+#else
 #include "xtime_l.h"
+#endif
 #include "lwip/err.h"
 #include "lwip/tcp.h"
 

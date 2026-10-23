@@ -154,13 +154,20 @@ LWIP = (("lwip220_api_mode", "RAW_API"),
         ("lwip220_pbuf_pool_size", "2048"))
 
 
+# lwIP's TCP timers run from xiltimer's interval timer ( main.c of the
+# template, SDT build ): TTC0, enabled for this in vivado/build.tcl
+XILTIMER = (("XILTIMER_en_interval_timer", "true"),
+            ("XILTIMER_tick_timer", "ps7_ttc_0"))
+
+
 def set_lwip(dom):
-    for param, value in LWIP:
-        try:
-            dom.set_config(option="lib", param=param, value=value, lib_name="lwip220")
-            print("lwip220: %s = %s" % (param, value))
-        except Exception as e:                  # keep going, report it
-            print("NOTE: lwip220 %s not set: %s" % (param, e))
+    for lib, settings in (("lwip220", LWIP), ("xiltimer", XILTIMER)):
+        for param, value in settings:
+            try:
+                dom.set_config(option="lib", param=param, value=value, lib_name=lib)
+                print("%s: %s = %s" % (lib, param, value))
+            except Exception as e:              # keep going, report it
+                print("NOTE: %s %s not set: %s" % (lib, param, e))
 
 
 set_lwip(domain)
@@ -196,12 +203,26 @@ app = client.create_app_component(name="la16_eth", platform=xpfm,
 platform = client.get_component(name="s9_platform")
 set_lwip(platform.get_domain(name=domain_name))
 platform.build()
+for r, _, fs in os.walk(os.path.join(ws, "s9_platform", "export")):
+    if "xtimer_config.h" in fs:
+        with open(os.path.join(r, "xtimer_config.h")) as f:
+            if re.search(r"^#define XTIMER_NO_TICK_TIMER", f.read(), re.M):
+                print("WARNING: the BSP has no xiltimer tick timer, lwIP TCP timers will not run")
 
 src = os.path.join(ws, "la16_eth", "src")
 echo = os.path.join(src, "echo.c")
 if os.path.exists(echo):
     os.remove(echo)
 shutil.copy(os.path.join(here, "la16_server.c"), src)
+# The unified Vitis app lists its sources by name in UserConfig.cmake
+user_cfg = os.path.join(src, "UserConfig.cmake")
+if os.path.exists(user_cfg):
+    with open(user_cfg) as f:
+        text = f.read()
+    text, n = re.subn(r'"echo\.c"', '"la16_server.c"', text)
+    with open(user_cfg, "w") as f:
+        f.write(text)
+    print("UserConfig.cmake: echo.c -> la16_server.c ( %d place%s )" % (n, "" if n == 1 else "s"))
 
 # Static IP of the template's main.c
 main_c = os.path.join(src, "main.c")
@@ -227,7 +248,9 @@ for root, _, files in os.walk(os.path.join(ws, "la16_eth")):
     if "la16_eth.elf" in files:
         elf = os.path.join(root, "la16_eth.elf")
 if not elf:
-    sys.exit("ERROR: la16_eth.elf not produced, see the build output above")
+    print("ERROR: la16_eth.elf not produced, see the build output above")
+    vitis.dispose()             # else the Vitis server keeps the workspace locked
+    sys.exit(1)
 shutil.copy(elf, os.path.join(out_dir, "la16_eth.elf"))
 with open(os.path.join(out_dir, "la16_eth_ip.txt"), "w") as f:
     f.write(ip + "\n")

@@ -1,4 +1,4 @@
-# Status proyek (23-10-2026)
+# Status proyek (24-10-2026)
 
 Catatan serah terima untuk melanjutkan pekerjaan di session lain. Detail ada di `README.md`,
 `docs/PRODUCT_PLAN.md`, `docs/PROTOCOL_LA16.md`, `sw/la16_eth/README.md`, dan
@@ -35,69 +35,58 @@ Prototipe: board kontrol Antminer S9 bekas (Zynq XC7Z010-1CLG400, DDR3L 512 MB,
 | `antminer_s9_la16` (BRAM 64K, 200 MS/s, trigger level/tepi, Stop) | ✅ board, uji a–g |
 | Init DDR S9 (`vivado/s9_ddr_init.tcl`, nilai dari U-Boot antminer_s9) + `s9_ddr_test` | ✅ board, semua PASS |
 | `antminer_s9_la16ddr` (ring DDR lewat HP0, maks. 251.658.240 sampel) | ✅ board: 1M @200 MS/s, 4M @1 MS/s benar |
-| `antminer_s9_la16eth` bitstream (HP0 + GP0 register `la16_regs.v` @0x43C00000) | ✅ build 2024.2, WNS 0,311 ns |
+| `antminer_s9_la16eth` bitstream (HP0 + GP0 register `la16_regs.v` @0x43C00000, TTC0) | ✅ build 2024.2, WNS 0,311 ns |
 | Server ARM `sw/la16_eth/la16_server.c` (lwIP RAW, TCP 5555) | ✅ uji host (`sw/la16_eth/test/`) |
+| `la16_eth.elf` lewat `vitis_build.py` (Vitis 2024.2, workspace `D:\la16ws`) | ✅ build 24-10-2026, belum diuji di board |
 
 ## Sedang dikerjakan
 
-Membuat `la16_eth.elf` dengan Vitis 2024.2:
+Uji Ethernet di board dengan `vivado\build_antminer_s9_la16eth\la16_eth.elf` (langkah 1 di
+bawah). Build ulang dari nol:
 
 ```
 cd vivado
-build.bat antminer_s9_la16eth          (sudah, dengan Vivado 2024.2)
-set BOARD=
-vitis -s ..\sw\la16_eth\vitis_build.py
+build.bat antminer_s9_la16eth          (Vivado 2024.2, set VIVADO=...\2024.2\bin\vivado.bat)
+vitis -s ..\sw\la16_eth\vitis_build.py > vitis_out.txt 2>&1
 ```
 
-Masalah yang sudah diatasi:
+Masalah build yang sudah diatasi:
 
 1. "System DTS File does not exist": XSA dari Vivado 2025.2 → build ulang dengan 2024.2.
 2. `sdtgen.bat` tidak ada di 2024.2 → sdtgen dijalankan lewat `xsct -eval`.
-3. "antminer_s9_la16eth.dtsi board file is not present in DTG": sdtgen membaca
-   `env(board)`, sedangkan `build.bat` lama meninggalkan `set BOARD=...` di jendela cmd.
-   Sekarang `build.bat` memakai `setlocal`/`TARGET`, dan `vitis_build.py` menghapus variabel
-   `board`.
-4. `create_app_component`: "Platform ... s9_platform.xpfm does not exist in the repository"
-   → `.xpfm` dicari lewat `client.find_platform_in_repos`, dengan cadangan pencarian di
-   workspace + `add_platform_repos` (commit 71c57d4).
-5. Build FSBL macet → platform dibuat dengan `no_boot_bsp=True`.
-6. BSP gagal "opening dependency file ... No such file or directory": jalur Windows > 260
-   karakter. Workspace Vitis sekarang `D:\la16ws` (opsi `--ws`). **Belum diuji pengguna.**
+3. "antminer_s9_la16eth.dtsi board file is not present in DTG": variabel `BOARD` yang tertinggal
+   di jendela cmd → `build.bat` memakai `setlocal`/`TARGET`, `vitis_build.py` menghapus `board`.
+4. ".xpfm does not exist in the repository" → `client.find_platform_in_repos` + cadangan.
+5. Build FSBL macet → platform dengan `no_boot_bsp=True`.
+6. Jalur Windows > 260 karakter → workspace `D:\la16ws` (opsi `--ws`).
+7. Template `lwip_echo_server`: "requires at least one timer hardware instance" → TTC0 diaktifkan
+   di PS7 (`vivado/build.tcl`, tanpa pin). SCU timer tidak dihitung oleh template.
+8. Interval timer xiltimer mati di BSP (pengaturan library template tidak terbawa, sama seperti
+   DHCP) → `vitis_build.py` men-set `XILTIMER_en_interval_timer=true`,
+   `XILTIMER_tick_timer=ps7_ttc_0`, dan memberi WARNING bila BSP tetap tanpa tick timer. Tanpa
+   ini timer TCP lwIP tidak pernah jalan.
+9. `UserConfig.cmake` app mendaftar `echo.c` secara eksplisit → diganti `la16_server.c`.
+10. `xtime_l.h` tidak ada di BSP SDT → `la16_server.c` memakai `xiltimer.h` bila `SDT`.
+11. Vitis server tertinggal mengunci `D:\la16ws\_ide\.wsdata\.lock` setelah build gagal →
+    skrip sekarang memanggil `vitis.dispose()` sebelum keluar. Kalau masih terkunci: tutup
+    proses `java.exe` (RigelApp) milik Vitis.
 
-Cara mengambil log lengkap (output terminal terlalu panjang dan terpotong):
-`vitis -s ..\sw\la16_eth\vitis_build.py > vitis_out.txt 2>&1`, lalu lampirkan
-`vivado\vitis_out.txt`.
-
-**Perlu dicek di log build berikutnya: pengaturan lwIP benar-benar masuk ke BSP?**
-Skrip mencetak `lwip220: lwip220_tcp_wnd = 16384` dan seterusnya (`set_config` tidak error),
-tapi CMakeCache BSP di log gagal sebelumnya masih berisi `lwip220_tcp_wnd:STRING=2048` dan
-`lwip220_temac_phy_link_speed:STRING=CONFIG_LINKSPEED_AUTODETECT` (nilai bawaan). Bisa jadi itu
-cache sebelum pengaturan diterapkan, bisa juga `set_config` tidak berpengaruh. Cek setelah build
-berhasil:
-
-* `D:\la16ws\s9_platform\ps7_cortexa9_0\standalone_ps7_cortexa9_0\bsp\include\lwipopts.h`
-  (atau cari `lwipopts.h` di `D:\la16ws`): harus ada `TCP_WND 16384`, `TCP_SND_BUF 32768`,
-  `MEM_SIZE 262144`, `PBUF_POOL_SIZE 2048`, `LWIP_DHCP 0`.
-* Cari `CONFIG_LINKSPEED1000` di header BSP (`xlwipconfig.h`).
-
-Kalau tidak masuk: Ethernet tetap jalan, tapi upload lambat (window 2 KB) dan autodetect
-PHY Broadcom bisa gagal (link tidak terbentuk). Perbaikannya: cari nama parameter yang benar
-(Vitis 2024.2: `domain.get_config(option="lib", lib_name="lwip220")` atau
-`domain.list_params(...)`), atau ubah `lwipopts.h`/CMakeCache lalu `domain.regenerate()` +
-`platform.build()`.
+Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform\export\...`):
+`TCP_WND 16384`, `TCP_SND_BUF 32768`, `MEM_SIZE 262144`, `PBUF_POOL_SIZE 2048`, `LWIP_DHCP 0`,
+`CONFIG_LINKSPEED1000 1` (di `lwipopts.h`, bukan `xlwipconfig.h`). `xtimer_config.h`:
+`XTICKTIMER_IS_TTCPS`, base 0xF8001000.
 
 ## Langkah berikutnya
 
-1. `vitis_build.py` sampai menghasilkan `vivado\build_antminer_s9_la16eth\la16_eth.elf`.
-2. Uji Ethernet di board:
+1. Uji Ethernet di board:
    * `s9_jtag_load.bat build_antminer_s9_la16eth` (init MIO + DDR, bitstream, `dow` ELF, `con`).
    * Laptop 192.168.1.2/24 di port Gigabit, `ping 192.168.1.10`.
    * PulseView (installer run 39973273719): driver `la16`, Network / Raw TCP
      `192.168.1.10:5555`. Uji capture kecil, lalu besar (puluhan–ratusan juta sampel), ukur
      kecepatan upload.
-3. Mode streaming (`CONFIG` mode 1/2): DDR sebagai FIFO, ARM mengirim di belakang pointer
+2. Mode streaming (`CONFIG` mode 1/2): DDR sebagai FIFO, ARM mengirim di belakang pointer
    tulis. Perlu register pointer tulis di `la16_regs.v` dan dukungan di driver.
-4. RLE (`DATA_RLE`), threshold yang bisa diatur (hardware front-end produk), lalu P2
+3. RLE (`DATA_RLE`), threshold yang bisa diatur (hardware front-end produk), lalu P2
    (Tang Primer 20K + FT232H sync FIFO).
 
 ## Catatan teknis penting
