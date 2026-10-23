@@ -31,24 +31,27 @@
 #                            registers on M_AXI_GP0 )
 #   zybo_z7_10/arty_z7_10 -> la_top    ( clock = 125 MHz PL oscillator, PL only )
 # -----------------------------------------------------------------------------
-set board  [expr { [llength $argv] > 0 ? [lindex $argv 0] : "antminer_s9" }]
+# Named "target", not "board": write_hw_platform picks up a global Tcl "board"
+# as the XSA board name, and Vitis sdtgen then fails looking for
+# <name>.dtsi ( "board file is not present in DTG" ).
+set target [expr { [llength $argv] > 0 ? [lindex $argv 0] : "antminer_s9" }]
 set part   xc7z010clg400-1
 
 set script_dir [file normalize [file dirname [info script]]]
 set root       [file normalize "$script_dir/.."]
-set out_dir    "$script_dir/build_$board"
+set out_dir    "$script_dir/build_$target"
 # Variants "<board>_ols" / "<board>_la16" use the base board pins with the
 # OLS or la16 engine instead of SUMP3
 set variant ""
 foreach v { ols la16 la16ddr la16eth } {
-  if { [string match "*_$v" $board] } { set variant $v }
+  if { [string match "*_$v" $target] } { set variant $v }
 }
 set ols_variant [expr { $variant ne "" }]
-set pin_board   [expr { $ols_variant ? [string range $board 0 end-[expr { [string length $variant] + 1 }]] : $board }]
+set pin_board   [expr { $ols_variant ? [string range $target 0 end-[expr { [string length $variant] + 1 }]] : $target }]
 set board_xdc  "$root/constraints/$pin_board.xdc"
 
 if { ![file exists $board_xdc] } {
-  puts "ERROR: no constraints for board '$board' ( $board_xdc )"
+  puts "ERROR: no constraints for board '$target' ( $board_xdc )"
   exit 1
 }
 if { !$ols_variant && ![file exists "$root/third_party/sump3/verilog/sump3_core.v"] } {
@@ -279,8 +282,8 @@ if { $variant eq "ols" } {
 
 read_xdc $board_xdc
 # Variant specific extra pins, e.g. constraints/antminer_s9_ols.xdc / _la16.xdc
-if { $ols_variant && [file exists "$root/constraints/$board.xdc"] } {
-  read_xdc "$root/constraints/$board.xdc"
+if { $ols_variant && [file exists "$root/constraints/$target.xdc"] } {
+  read_xdc "$root/constraints/$target.xdc"
 }
 
 synth_design -top $top -part $part
@@ -309,6 +312,8 @@ if { [file exists "$out_dir/la_top.bin"] } {
 }
 
 if { $use_ps } {
+  # No board part / board id: a custom board without a Vitis device tree file
+  catch { set_property platform.board_id {} [current_project] }
   if { [catch { write_hw_platform -fixed -force -file "$out_dir/la_top.xsa" } err] } {
     puts "NOTE: write_hw_platform skipped ( $err )"
   }
@@ -316,7 +321,7 @@ if { $use_ps } {
 
 set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
 puts "======================================================================"
-puts " Board      : $board ( $part ), top = $top"
+puts " Board      : $target ( $part ), top = $top"
 puts " Bitstream  : $out_dir/la_top.bit"
 puts " Linux      : $out_dir/la_top.bit.bin"
 puts " Setup WNS  : $wns ns"

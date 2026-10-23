@@ -55,6 +55,8 @@ try:
                 found = sorted(set(re.findall(rb"20[12]\d\.\d", z.read(name))))
                 if found:
                     print("XSA %-20s mentions versions %s" % (name, b" ".join(found).decode()))
+                for m in re.findall(rb'"?[Bb]oard[A-Za-z_]*"?\s*[:=]\s*"([^"]*)"', z.read(name)):
+                    print("XSA %-20s board = '%s'" % (name, m.decode()))
 except Exception as e:
     print("NOTE: could not read the XSA: %s" % e)
 
