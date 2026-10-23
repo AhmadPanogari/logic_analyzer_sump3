@@ -659,6 +659,11 @@ jumper baud sama dengan mode OLS):
   workflow `.github/workflows/pulseview-windows.yml` ke installer PulseView yang sama dengan
   patch OLS. Di PulseView pilih driver **"la16 FPGA logic analyzer"**, port COM channel B,
   baud sesuai jumper J9 (default 921600).
+* **Diuji di board S9 (23-10-2026), PulseView ber-patch + driver `la16`, 921600 baud, pola
+  uji:** capture 64K @1 MHz + decoder UART; Run berulang dan ganti jumlah sampel tanpa
+  Connect ulang; 200 MS/s (pulsa 10 ns di D14 = 2 sampel); trigger tepi naik D0 dan tepi
+  turun D13 tepat di penanda; Stop saat menunggu trigger lalu Run lagi; status capture di
+  log PulseView. Semua sesuai.
 * Co-sim driver ⇄ RTL: `sim/la16/run_cosim.sh` (sigrok-cli + driver `la16` ⇄ TCP ⇄
   cocotb ⇄ `la16_engine`). Lolos: scan, divider 200 MS/s dan 1 MS/s, trigger level
   0x1234 di posisi 25 %, tepi naik D15 dan tepi turun D3 tepat di posisi pra-trigger,

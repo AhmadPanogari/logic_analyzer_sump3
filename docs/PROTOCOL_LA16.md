@@ -1,6 +1,6 @@
 # Protokol dan driver sendiri (`la16`, nama kerja)
 
-Status: **v1 diimplementasikan** (RTL `rtl/la16/`, driver `host/sigrok/libsigrok-la16-driver.patch`), belum diuji di board. Nama `la16` hanya nama kerja, mudah
+Status: **v1 diimplementasikan** (RTL `rtl/la16/`, driver `host/sigrok/libsigrok-la16-driver.patch`), **diuji di board S9** (23-10-2026): capture, Run berulang, 200 MS/s, trigger tepi naik/turun, Stop saat menunggu trigger, status di log PulseView. Nama `la16` hanya nama kerja, mudah
 diganti sebelum rilis.
 
 ## Kenapa
@@ -143,7 +143,7 @@ Detail dan angka ada di `docs/PRODUCT_PLAN.md` (3c, 5c, 5d).
 | 2 ✅ | RTL `rtl/la16/`: parser frame + CRC, engine capture (BRAM 64K, divider, trigger level/tepi, pra-trigger, upload terlama dulu, status periodik, **2 sampel per clock / 200 MS/s**). Bitstream `antminer_s9_la16`. Engine OLS tetap ada | cocotb: model host Python ⇄ RTL |
 | 3 ✅ | Driver libsigrok `la16` | Co-sim: sigrok-cli dan `ols_multirun`-style ⇄ TCP ⇄ RTL (infrastruktur `sim/ols`) |
 | 4 ✅ | Workflow CI membangun PulseView dengan patch OLS + driver `la16` | Installer dari Actions |
-| 5 | Uji di board S9 | Run berulang, trigger tepi, Stop saat menunggu, gelombang bertahap |
+| 5 ✅ | Uji di board S9 | Run berulang, trigger tepi, Stop saat menunggu, gelombang bertahap |
 | 6 | RLE di BRAM + `DATA_RLE` | Co-sim + board |
 | 7 | Buffer DDR3 S9 lewat AXI HP (setelah chip DDR S9 diketahui), UART 12 Mbaud | Board |
 | 8 | (Produk P2, Tang Primer 20K + FT232H) mode streaming mentah dan RLE, transport USB sync FIFO | — |
