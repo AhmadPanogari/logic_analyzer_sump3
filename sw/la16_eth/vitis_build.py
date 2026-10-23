@@ -63,30 +63,57 @@ except Exception as e:
 import subprocess
 vitis_root = os.environ.get("XILINX_VITIS") or os.path.normpath(
     os.path.join(os.path.dirname(vitis.__file__), "..", ".."))
-sdtgen = os.path.join(vitis_root, "bin", "sdtgen.bat" if os.name == "nt" else "sdtgen")
+exe = ".bat" if os.name == "nt" else ""
 sdt_dir = os.path.join(out_dir, "sdt_check")
 if os.path.exists(sdt_dir):
     shutil.rmtree(sdt_dir)
-if os.path.isfile(sdtgen):
-    tcl = "sdtgen set_dt_param -xsa {%s} -dir {%s}; sdtgen generate_sdt" % (
-        xsa.replace("\\", "/"), sdt_dir.replace("\\", "/"))
-    print("Running:", sdtgen, "-eval", tcl)
-    res = subprocess.run([sdtgen, "-eval", tcl], capture_output=True, text=True)
-    print(res.stdout[-4000:])
-    print(res.stderr[-4000:])
-    if not os.path.isfile(os.path.join(sdt_dir, "system-top.dts")):
-        sys.exit("ERROR: sdtgen did not produce system-top.dts, see its output above")
-    print("sdtgen OK: %s" % os.path.join(sdt_dir, "system-top.dts"))
+tcl = "sdtgen set_dt_param -xsa {%s} -dir {%s}; sdtgen generate_sdt" % (
+    xsa.replace("\\", "/"), sdt_dir.replace("\\", "/"))
+# 2025.x ships a sdtgen launcher, 2024.2 has the sdtgen command inside xsct
+for tool in ("sdtgen", "xsct"):
+    path = os.path.join(vitis_root, "bin", tool + exe)
+    if os.path.isfile(path):
+        print("Running:", path, "-eval", tcl)
+        res = subprocess.run([path, "-eval", tcl], capture_output=True, text=True,
+                             shell=(os.name == "nt"))
+        print(res.stdout[-6000:])
+        print(res.stderr[-6000:])
+        if not os.path.isfile(os.path.join(sdt_dir, "system-top.dts")):
+            sys.exit("ERROR: %s did not produce system-top.dts, see its output above" % tool)
+        print("sdtgen OK: %s" % os.path.join(sdt_dir, "system-top.dts"))
+        break
 else:
-    print("NOTE: %s not found, skipping the sdtgen check" % sdtgen)
+    print("NOTE: neither sdtgen nor xsct found in %s\\bin, skipping the check" % vitis_root)
+
+
+def dump_logs(root):
+    """Print the tail of every log Vitis left in the workspace."""
+    for r, _, files in os.walk(root):
+        for f in files:
+            if f.endswith((".log", ".txt")):
+                path = os.path.join(r, f)
+                try:
+                    with open(path, errors="replace") as fh:
+                        tail = fh.read()[-3000:]
+                except OSError:
+                    continue
+                print("----- %s -----" % path)
+                print(tail)
+
 
 client = vitis.create_client()
 client.set_workspace(path=ws)
 
 domain_name = "standalone_ps7_cortexa9_0"
-platform = client.create_platform_component(
-    name="s9_platform", hw_design=xsa, os="standalone",
-    cpu="ps7_cortexa9_0", domain_name=domain_name)
+try:
+    platform = client.create_platform_component(
+        name="s9_platform", hw_design=xsa, os="standalone",
+        cpu="ps7_cortexa9_0", domain_name=domain_name)
+except Exception as e:
+    print("ERROR: platform creation failed: %s" % e)
+    dump_logs(ws)
+    vitis.dispose()
+    sys.exit(1)
 domain = platform.get_domain(name=domain_name)
 domain.set_lib(lib_name="lwip220")
 LWIP = (("lwip220_api_mode", "RAW_API"),
