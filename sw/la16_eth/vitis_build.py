@@ -99,7 +99,7 @@ def dump_logs(root):
     """Print the tail of every log Vitis left in the workspace."""
     for r, _, files in os.walk(root):
         for f in files:
-            if f.endswith((".log", ".txt")):
+            if f.endswith(".log") or (f.endswith(".txt") and "qemu" not in r.lower()):
                 path = os.path.join(r, f)
                 try:
                     with open(path, errors="replace") as fh:
@@ -127,8 +127,8 @@ try:
             name="s9_platform", hw_design=xsa, os="standalone",
             cpu="ps7_cortexa9_0", domain_name=domain_name)
 except Exception as e:
-    print("ERROR: platform creation failed: %s" % e)
     dump_logs(ws)
+    print("ERROR: platform creation failed: %s" % e)
     vitis.dispose()
     sys.exit(1)
 domain = platform.get_domain(name=domain_name)
@@ -167,8 +167,8 @@ if not xpfm:
     found = [os.path.join(r, f) for r, _, fs in os.walk(ws) for f in fs if f.endswith(".xpfm")]
     print("xpfm files in the workspace:", found or "none")
     if not found:
-        print("ERROR: the platform build did not export a .xpfm, see the output above")
         dump_logs(ws)
+        print("ERROR: the platform build did not export a .xpfm ( platform.build() = %s )" % status)
         vitis.dispose()
         sys.exit(1)
     xpfm = found[0]
