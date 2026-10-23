@@ -67,20 +67,84 @@ python fetch_third_party.py
 
 ## Spesifikasi
 
+Angka **terukur** berasal dari uji di board kontrol Antminer S9 (Vivado 2025.2, JTAG
+lewat FT2232H CJMCU). Sisanya mengikuti desain di `rtl/`.
+
+### Hardware
+
 | Item | Nilai |
 |---|---|
-| FPGA | XC7Z010-1CLG400 |
-| Clock capture | 100 MHz (resolusi 10 ns). S9: `FCLK_CLK0` dari PS. Zybo/Arty: MMCM dari oscillator PL |
-| Channel eksternal | 16 (`D0`..`D15`), LVCMOS33 (maks. 3,3 V), pull-down internal |
-| Kedalaman `probe_pod` | 4096 event RLE × (16 data + 30 timestamp) → hingga 10,7 s per capture |
-| Kedalaman `debug_pod` | 2048 event RLE × 32 sinyal internal |
-| Interface host | UART 3.3V, MesaBus, autobaud (default 921600) |
-| Alamat SUMP3 | ctrl `0x98`, data `0x9C` (`sump_uut_addr = 00000098`) |
+| FPGA | Zynq **XC7Z010-1CLG400** (board kontrol Antminer S9; juga Zybo Z7-10 / Arty Z7-10) |
+| Clock capture | **100 MHz** → resolusi **10 ns**. S9: `FCLK_CLK0` dari PS. Zybo/Arty: MMCM dari oscillator PL |
+| Pulsa terpendek | 10 ns (**terukur**: pulsa 10 ns di D14 tertangkap) |
+| Frekuensi sinyal | Teori sampai 50 MHz; **disarankan ≤ 25 MHz** (≥ 4 sampel per periode) |
+| Channel eksternal | **16** (`D0`..`D15`). S9: J5–J8 pin 5/11/12/15 |
+| Channel internal | 32 sinyal debug (`demo_cnt[23:0]`, `mesa_rx`, `mesa_tx`, `lb_wr`, `lb_rd`, `btn0..3`) |
+| Level input | LVCMOS33: rendah ≤ 0,8 V, tinggi ≥ 2,0 V. **Maks. 3,3 V, tidak tahan 5 V** |
+| Input | Pull-down internal, sinkronizer 2 flip-flop (flop pertama di IOB) |
+| Pola uji bawaan | S9: jumper J9 pin 5 → GND. Zybo/Arty: `sw[0]`. UART 115200, SPI 1 MHz, counter, PWM, pulsa 10 ns |
+| Indikator (S9) | D5 heartbeat, D6 clock OK, D7 pola uji, D8 aktivitas UART RX |
 
-Karena RLE hanya menyimpan *perubahan* sinyal, 4096 event bisa mencakup durasi yang
-jauh lebih panjang daripada 4096 sampel biasa. Untuk capture lebih dalam, ubah
-`rle_ram_depth_len`/`rle_ram_depth_bits` di `rtl/la_sump3.v` (harus 2^N; XC7Z010
-punya 60 BRAM36, 8192 × 48 bit ≈ 11 BRAM36).
+### Memori dan kompresi RLE
+
+| Item | `probe_pod` (D0–D15) | `debug_pod` (internal) |
+|---|---|---|
+| Kedalaman | **4096 event** | 2048 event |
+| Lebar entri | 48 bit (2 kode + 30 timestamp + 16 data) | 64 bit (2 + 30 + 32) |
+| Rentang waktu maks. | **10,7 s** (2³⁰ × 10 ns) | 10,7 s |
+
+RLE hanya menyimpan **perubahan** sinyal, jadi lama rekaman tergantung aktivitas sinyal:
+
+| Kondisi sinyal | Perkiraan lama rekaman |
+|---|---|
+| Jarang berubah (tombol, enable, status) | Sampai ±10 s |
+| Pola uji (SPI 1 MHz + counter + UART) | **±3,4 ms** (**terukur**: −169 µs … +3,2 ms) |
+| Satu clock 1 MHz terus berdetak | ±2 ms (2 juta perubahan/detik) |
+
+Channel yang tidak penting bisa di-*mask* (ViewConfig → MaskSig) supaya tidak menghabiskan
+event (belum diuji di board). Untuk capture lebih dalam, ubah
+`rle_ram_depth_len`/`rle_ram_depth_bits` di `rtl/la_sump3.v` (harus 2^N; XC7Z010 punya
+60 BRAM36, 8192 × 48 bit ≈ 11 BRAM36).
+
+### Trigger
+
+| Item | Nilai |
+|---|---|
+| Tipe | `or_rising`, `or_falling`, `and_rising`, `and_falling` |
+| Sumber | Bit mana pun di D0–D15 dan sinyal debug, boleh beberapa sekaligus |
+| Posisi | 10 / 25 / 50 / 75 / 90 % buffer (di GUI: 0/25/50/75/100 %) |
+| Lainnya | Trig Delay, Trig Nth (kejadian ke-N), Force_Trig |
+| Tidak tersedia | Trigger eksternal dan analog (tidak dipakai di desain ini) |
+| **Terukur** | `or_falling` di D0, Trig Pos 0 % |
+
+### Interface dan software
+
+| Item | Nilai |
+|---|---|
+| Program FPGA (S9) | JTAG + XSDB (`vivado/s9_jtag_load.tcl`), volatile. **Terukur** dengan FT2232H CJMCU (`program_ftdi`) |
+| Komunikasi | UART MesaBus 3,3 V, autobaud, default **921600 baud** |
+| Alamat SUMP3 | ctrl `0x98`, data `0x9C` (`sump_uut_addr = 00000098`) |
+| Jembatan PC | `bd_server.py`, TCP port 21567 |
+| Kontrol capture | GUI `sump3.py` (Connect → Apply view → Set_Trigs → Acquire) |
+| Penampil | PulseView via Save_VCD → `.sr` 100 MHz. **Terukur**: decoder UART dan SPI benar |
+| Waktu download | Beberapa detik per capture (belum diukur) |
+
+### Resource FPGA dan timing (build `antminer_s9`, Vivado 2025.2)
+
+| Item | Nilai |
+|---|---|
+| Block RAM | 9 RAMB36 + 2 RAMB18 ≈ 10 dari 60 BRAM36 (±17 %) |
+| Timing @ 100 MHz | WNS **+3,57 ns**, WHS +0,036 ns, 0 critical warning |
+| Ruang pengembangan | ±50 BRAM36 kosong, 12 I/O bebas di J2–J4 |
+
+### Batasan saat ini
+
+* **Tidak streaming**: trigger → isi buffer → download → tampil (lihat Fase 5 di roadmap).
+* Samplerate tetap 100 MHz; dengan RLE, menurunkan samplerate tidak diperlukan untuk
+  menghemat memori.
+* Satu domain clock (1 hub).
+* Kontrol capture masih di GUI `sump3.py`; PulseView hanya penampil (lihat roadmap).
+* Belum diuji di board: mask channel, posisi trigger selain 0 %, sinyal rangkaian luar.
 
 ## Hardware
 
