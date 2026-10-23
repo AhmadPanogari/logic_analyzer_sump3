@@ -15,63 +15,34 @@ dengan MXE yang dikunci di commit `b48b3cc` (2021).
 
 Ada dua jalur:
 
-| | A. GitHub Actions (disarankan) | B. Lokal di VM Ubuntu 22.04 |
+| | A. GitHub Actions di repo ini (disarankan) | B. Lokal di VM Ubuntu 22.04 |
 |---|---|---|
 | Yang di-build di laptop | Tidak ada | MXE + sigrok + PulseView |
-| Waktu | ±30–60 menit (server GitHub) | 2–4 jam |
+| Waktu | Run pertama ±1 jam 20 menit, berikutnya ±10 menit (MXE di-cache) | 2–4 jam |
 | Disk | — | ±25 GB |
-| Butuh | Akun GitHub | VM 4+ core, 8 GB RAM |
 
-## Jalur A: GitHub Actions
+## Jalur A: GitHub Actions di repo ini
 
-Skrip CI-nya sama persis dengan nightly sigrok. Bedanya hanya libsigrok diambil dari
-fork Anda yang sudah di-patch.
+Workflow: `.github/workflows/pulseview-windows.yml`. Isinya sama dengan nightly sigrok
+(`sigrok-build/ci/mxe`), dengan dua perbedaan:
 
-### A1. Fork libsigrok dan pasang patch
+* MXE (commit `b48b3cc` + patch `sigrok-build/docker/*.patch`) di-build di runner lalu
+  di-cache. Image `ghcr.io/sigrokproject/sigrok-mxe` milik sigrok privat, sehingga di fork
+  `docker pull` selalu gagal dengan `denied`.
+* `host/sigrok/libsigrok-ols-rx-robust.patch` dipasang dengan `git apply` tepat setelah
+  libsigrok di-clone. Fork libsigrok tidak diperlukan.
 
-1. Buka <https://github.com/sigrokproject/libsigrok>, lalu klik **Fork**.
-2. Di VM Ubuntu (atau Git Bash di Windows):
+Workflow berjalan otomatis setiap kali file workflow atau `host/sigrok/**` berubah. Bisa
+juga dijalankan manual: *Actions → PulseView Windows (OLS patch) → Run workflow* (untuk
+jalan manual, workflow harus ada di branch default).
 
-   ```bash
-   git clone https://github.com/<akun>/libsigrok.git
-   cd libsigrok
-   git checkout -b ols-rx-robust
-   git apply --check ~/libsigrok-ols-rx-robust.patch && git apply ~/libsigrok-ols-rx-robust.patch
-   git commit -am "ols: read in blocks, ignore empty reads (Windows repeated runs)"
-   git push -u origin ols-rx-robust
-   ```
+Hasil: *Actions → run → Artifacts → `pulseview-ols-x86_64-installer`* (zip berisi
+`pulseview-ols-<tanggal>-x86_64-installer.exe`, tersimpan 90 hari). Patch terpasang jika di
+log langkah *sigrok libraries* ada `== libsigrok changes ==` diikuti
+`src/hardware/openbench-logic-sniffer/protocol.c | 29`.
 
-   Untuk `git push`, password GitHub diisi dengan **Personal Access Token**
-   (*Settings → Developer settings → Personal access tokens*, scope `repo`).
-
-### A2. Fork sigrok-build dan arahkan ke fork libsigrok
-
-1. Buka <https://github.com/sigrokproject/sigrok-build>, klik **Fork**, dan **biarkan nama
-   repo tetap `sigrok-build`**. Job di workflow hanya berjalan jika nama repo berakhiran
-   `sigrok-build`.
-2. Di fork, buka tab **Actions** dan klik **I understand my workflows, go ahead and enable
-   them**.
-3. Edit `.github/workflows/build.yml` di web GitHub (ikon pensil). Di blok `env:` paling
-   atas, ubah dua baris:
-
-   ```yaml
-   LIBSIGROK_REPO: "https://github.com/<akun>/libsigrok.git"
-   LIBSIGROK_BRANCH: "ols-rx-robust"
-   ```
-
-   Lalu **Commit changes**. Commit ini langsung menjalankan workflow (`on: push`).
-   Bisa juga dijalankan manual: *Actions → Build sigrok artifacts → Run workflow*.
-
-### A3. Ambil installer
-
-1. Tunggu job **PulseView MXE build (x86_64) (Release)** selesai (hijau). Job lain
-   (macOS, AppImage, sigrok-cli) boleh diabaikan atau di-cancel.
-2. Di halaman run, bagian **Artifacts**, unduh `artifact-pulseview-x86_64-release-mxe`
-   (zip berisi `pulseview-NIGHTLY-x86_64-release-installer.exe`).
-3. Uninstall PulseView lama, lalu jalankan installer baru.
-
-Untuk memastikan patch terpasang, buka log job → langkah **Build dependencies** dan cari
-`Cloning into 'libsigrok'`. Sebelumnya harus ada clone dari `github.com/<akun>/libsigrok`.
+Run pertama (23-10-2026): MXE 58 menit, sigrok 2 menit, PulseView + installer 4 menit.
+Hasilnya `pulseview-0.5.0-git-af02198` + patch OLS.
 
 ## Jalur B: lokal di VM Ubuntu 22.04
 
