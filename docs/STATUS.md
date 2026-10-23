@@ -83,6 +83,11 @@ Masalah build yang sudah diatasi:
     pernah melihat data. `host/sigrok/libsigrok-tcp-win32-readable.patch` memakai `select()`
     Winsock (diuji di Windows terhadap board). Perlu installer baru dari CI. Catatan: installer
     run 39973273719 (`dbda1f4`) sudah berisi perbaikan drain; installer `f95c813` belum.
+14. Upload lambat. Diukur dengan klien socket Python (tanpa PulseView): server 3,05 MB/s →
+    **11,4 MB/s** (5,7 M sampel/s, 4M dan 40M sampel utuh) setelah CRC-8 tabel + aplikasi
+    `-O2`. Driver la16 di Windows dibatasi ±40 KB/s (satu baca 2 KB per callback, callback
+    hanya lewat timeout 50 ms) → driver sekarang menguras koneksi tiap callback (maks. 20 ms),
+    buffer 16 frame, callback 5 ms. **Driver baru belum di-build CI / diuji di PulseView.**
 
 Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform\export\...`):
 `TCP_WND 16384`, `TCP_SND_BUF 32768`, `MEM_SIZE 262144`, `PBUF_POOL_SIZE 2048`, `LWIP_DHCP 0`,
