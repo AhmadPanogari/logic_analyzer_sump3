@@ -363,5 +363,7 @@ menghubungi BlackMesaLabs.
 - [x] Sample-rate divider untuk mode buffer (5d), mengikuti logIP/Enxor
 - [ ] Analisis LCD SPI cepat (≥ 40 MHz) / frame penuh di SCLK tinggi: perlu samplerate
       lebih tinggi atau buffer lebih besar; tentukan apakah masuk target v1
+- [x] Driver dan protokol sendiri (bukan OLS) untuk status capture, upload bertahap, trigger
+      tepi, lalu streaming: rancangan v0 di `docs/PROTOCOL_LA16.md`, mulai di board S9 lewat UART
 - [ ] Pilihan FPGA dan USB bridge (setelah P2)
 - [ ] Model distribusi: open hardware penuh, atau hardware terbuka + produk jadi berbayar
