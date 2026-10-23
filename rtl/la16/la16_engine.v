@@ -10,13 +10,14 @@
 --   Device -> host : 0x81 IDENT  0x82 ACK  0x83 STATUS  0x84 DATA
 --                    0x85 TRIGGER  0x86 END  0x8F ERROR
 --
---   Capture is done by la16_capture. After it completes the engine sends
+--   Capture is done by la16_capture ( BRAM, or PS DDR when USE_DDR = 1 ).
+--   After it completes the engine sends
 --   STATUS(4), TRIGGER ( only when a trigger condition is set ), DATA frames
 --   of up to 256 samples oldest first, END, STATUS(5). STATUS is also sent
 --   every 50 ms while capturing and on every state change.
 --   Supported in v1: mode 0 ( buffer ), upload format 0 ( raw ) or
 --   2 ( auto, sent raw ). Format 1 ( RLE ) and the streaming modes return
---   ERROR 3.
+--   ERROR 3. END flag bit 0 = DDR write FIFO overflow ( samples lost ).
 -- Language:    Verilog-2001
 -- ***************************************************************************/
 `timescale 1 ns/ 100 ps
@@ -24,9 +25,12 @@
 
 module la16_engine
 #(
-  parameter DEPTH_BITS = 16,
-  parameter CLK_HZ     = 100_000_000,
-  parameter BASE_HZ    = 200_000_000          // Two samples per clock
+  parameter        W           = 16,          // Sample index bits
+  parameter        MAX_SAMPLES = 65536,       // BRAM: 2^W
+  parameter        USE_DDR     = 0,
+  parameter [31:0] DDR_BASE    = 32'h0200_0000,
+  parameter        CLK_HZ      = 100_000_000,
+  parameter        BASE_HZ     = 200_000_000  // Two samples per clock
 )
 (
   input  wire         clk,
@@ -39,11 +43,50 @@ module la16_engine
   output reg          tx_valid,
   input  wire         tx_ready,
   output wire         armed,                  // Prefill or waiting for trigger
-  output wire         busy                    // Capturing or uploading
+  output wire         busy,                   // Capturing or uploading
+
+  // AXI3 master to the PS DDR ( USE_DDR = 1 )
+  output wire [31:0]  m_awaddr,
+  output wire [3:0]   m_awlen,
+  output wire [2:0]   m_awsize,
+  output wire [1:0]   m_awburst,
+  output wire [1:0]   m_awlock,
+  output wire [3:0]   m_awcache,
+  output wire [2:0]   m_awprot,
+  output wire [3:0]   m_awqos,
+  output wire [5:0]   m_awid,
+  output wire         m_awvalid,
+  input  wire         m_awready,
+  output wire [63:0]  m_wdata,
+  output wire [7:0]   m_wstrb,
+  output wire         m_wlast,
+  output wire [5:0]   m_wid,
+  output wire         m_wvalid,
+  input  wire         m_wready,
+  input  wire [1:0]   m_bresp,
+  input  wire [5:0]   m_bid,
+  input  wire         m_bvalid,
+  output wire         m_bready,
+  output wire [31:0]  m_araddr,
+  output wire [3:0]   m_arlen,
+  output wire [2:0]   m_arsize,
+  output wire [1:0]   m_arburst,
+  output wire [1:0]   m_arlock,
+  output wire [3:0]   m_arcache,
+  output wire [2:0]   m_arprot,
+  output wire [3:0]   m_arqos,
+  output wire [5:0]   m_arid,
+  output wire         m_arvalid,
+  input  wire         m_arready,
+  input  wire [63:0]  m_rdata,
+  input  wire [1:0]   m_rresp,
+  input  wire [5:0]   m_rid,
+  input  wire         m_rlast,
+  input  wire         m_rvalid,
+  output wire         m_rready
 );
 
-  localparam DEPTH = ( 1 << DEPTH_BITS );
-  localparam DW    = DEPTH_BITS + 1;
+  localparam DW    = W + 1;
 
   localparam [7:0] T_IDENT   = 8'h01, T_CONFIG = 8'h02, T_ARM    = 8'h03,
                    T_ABORT   = 8'h04, T_STATUS = 8'h05;
@@ -54,7 +97,7 @@ module la16_engine
                    E_BUSY    = 8'd4;
 
   localparam [31:0] BASE32 = BASE_HZ;
-  localparam [31:0] MAX32  = DEPTH;
+  localparam [31:0] MAX32  = MAX_SAMPLES;
   localparam        IDENT_LEN = 12 + 5 + 12 + 4;
   localparam [8*IDENT_LEN-1:0] IDENT_P =
     { 8'd1, 8'd16,                                          // version, channels
@@ -164,12 +207,16 @@ module la16_engine
   wire [31:0]  c_tmo    = { r_buf[27], r_buf[26], r_buf[25], r_buf[24] };
   wire         c_valid  = ( r_len == 16'd32 ) && ( c_mode == 8'd0 ) &&
                           ( c_format == 8'd0 || c_format == 8'd2 ) &&
-                          ( c_total != 32'd0 ) && ( c_total <= DEPTH ) &&
+                          ( c_total != 32'd0 ) && ( c_total <= MAX_SAMPLES ) &&
                           ( c_pre < c_total );
 
   // ---------------------------------------------------------------------
   // Configuration and capture
   // ---------------------------------------------------------------------
+  // Engine state ( STATUS codes ): 0 idle, 1..3 capture, 4 upload, 5 done
+  localparam ES_IDLE = 3'd0, ES_CAP = 3'd1, ES_UPLOAD = 3'd4, ES_DONE = 3'd5;
+  reg  [2:0]     es;
+
   reg  [31:0]    cfg_div;
   reg  [DW-1:0]  cfg_total;
   reg  [DW-1:0]  cfg_pre;
@@ -181,11 +228,14 @@ module la16_engine
   wire [2:0]     cap_state;
   wire [DW-1:0]  cap_count;
   wire           cap_done;
-  wire [DEPTH_BITS-1:0] rd_idx;
+  wire           cap_ready;
+  wire           cap_ovf;
+  wire [W-1:0]   rd_idx;
   wire [15:0]    rd_data;
+  wire           rd_ready;
   wire           has_trig = ( cfg_tlm | cfg_trm | cfg_tfm ) != 16'd0;
 
-  la16_capture #( .DEPTH_BITS ( DEPTH_BITS ) ) u_capture
+  la16_capture #( .W ( W ), .USE_DDR ( USE_DDR ), .DDR_BASE ( DDR_BASE ) ) u_capture
   (
     .clk       ( clk       ),
     .reset     ( reset     ),
@@ -203,13 +253,27 @@ module la16_engine
     .state     ( cap_state ),
     .captured  ( cap_count ),
     .done      ( cap_done  ),
+    .ready     ( cap_ready ),
+    .overflow  ( cap_ovf   ),
+    .rd_en     ( es == ES_UPLOAD ),
     .rd_idx    ( rd_idx    ),
-    .rd_data   ( rd_data   )
+    .rd_data   ( rd_data   ),
+    .rd_ready  ( rd_ready  ),
+    .m_awaddr  ( m_awaddr  ), .m_awlen   ( m_awlen   ), .m_awsize  ( m_awsize  ),
+    .m_awburst ( m_awburst ), .m_awlock  ( m_awlock  ), .m_awcache ( m_awcache ),
+    .m_awprot  ( m_awprot  ), .m_awqos   ( m_awqos   ), .m_awid    ( m_awid    ),
+    .m_awvalid ( m_awvalid ), .m_awready ( m_awready ), .m_wdata   ( m_wdata   ),
+    .m_wstrb   ( m_wstrb   ), .m_wlast   ( m_wlast   ), .m_wid     ( m_wid     ),
+    .m_wvalid  ( m_wvalid  ), .m_wready  ( m_wready  ), .m_bresp   ( m_bresp   ),
+    .m_bid     ( m_bid     ), .m_bvalid  ( m_bvalid  ), .m_bready  ( m_bready  ),
+    .m_araddr  ( m_araddr  ), .m_arlen   ( m_arlen   ), .m_arsize  ( m_arsize  ),
+    .m_arburst ( m_arburst ), .m_arlock  ( m_arlock  ), .m_arcache ( m_arcache ),
+    .m_arprot  ( m_arprot  ), .m_arqos   ( m_arqos   ), .m_arid    ( m_arid    ),
+    .m_arvalid ( m_arvalid ), .m_arready ( m_arready ), .m_rdata   ( m_rdata   ),
+    .m_rresp   ( m_rresp   ), .m_rid     ( m_rid     ), .m_rlast   ( m_rlast   ),
+    .m_rvalid  ( m_rvalid  ), .m_rready  ( m_rready  )
   );
 
-  // Engine state ( STATUS codes ): 0 idle, 1..3 capture, 4 upload, 5 done
-  localparam ES_IDLE = 3'd0, ES_CAP = 3'd1, ES_UPLOAD = 3'd4, ES_DONE = 3'd5;
-  reg  [2:0]     es;
   wire [2:0]     status_code = ( es == ES_CAP ) ? cap_state : es;
   reg  [2:0]     last_code;
 
@@ -288,7 +352,7 @@ module la16_engine
           end
         end
         T_ARM : begin
-          if ( es == ES_CAP || es == ES_UPLOAD ) begin
+          if ( es == ES_CAP || es == ES_UPLOAD || !cap_ready ) begin
             p_err <= 1'b1; p_err_code <= E_BUSY;
           end else if ( !cfg_ok ) begin
             p_err <= 1'b1; p_err_code <= E_CONFIG;
@@ -350,7 +414,7 @@ module la16_engine
     if ( es == ES_UPLOAD && !p_end && !p_trig &&
          ( up_abort || ( up_sent == cfg_total && !tx_start ) ) ) begin
       p_end       <= 1'b1;
-      p_end_flags <= up_abort ? 8'h02 : 8'h00;
+      p_end_flags <= { 6'd0, up_abort, cap_ovf };
     end
 
     if ( reset ) begin
@@ -473,9 +537,10 @@ module la16_engine
           ts    <= TS_PREP;
         end
       end
-      TS_PREP : begin                           // Wait for the BRAM read
-        prep <= prep + 1'b1;
-        if ( prep == 3'd4 ) begin
+      TS_PREP : begin                           // Wait for the sample read
+        if ( prep != 3'd4 ) prep <= prep + 1'b1;
+        if ( prep == 3'd4 && ( rd_ready || f_type != R_DATA || bidx < 16'd8 ||
+                               bidx == f_len + 16'd4 ) ) begin
           tx_byte  <= ( bidx == 16'd0 ) ? 8'hA5 :
                       ( bidx == 16'd1 ) ? f_type :
                       ( bidx == 16'd2 ) ? f_len[7:0] :

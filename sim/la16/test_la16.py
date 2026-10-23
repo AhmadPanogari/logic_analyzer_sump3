@@ -4,6 +4,7 @@ docs/PROTOCOL_LA16.md. Samples are a 16 bit counter at the 200 MS/s base
 rate ( +1 per base sample ), so every capture can be checked exactly.
 DEPTH_BITS = 12 ( 4096 samples ), CLK_HZ = 1 MHz in tb_la16.v.
 """
+import os
 import struct
 
 import cocotb
@@ -314,3 +315,23 @@ async def test_abort_during_upload(dut):
       end = struct.unpack("<IB", p)
   assert end[1] == 0x02 and end[0] == n and n < DEPTH, (end, n)
   dut._log.info("abort during upload: END after %d of %d samples", n, DEPTH)
+
+
+@cocotb.test(skip=os.environ.get("USE_DDR", "0") != "1")
+async def test_ddr_stalls(dut):
+  """DDR store: busy port ( random stalls ), wrap, partial last word, no overflow."""
+  h = await setup(dut)
+  for pct, total, pre, div in ((30, DEPTH, 1000, 0), (50, 1001, 333, 0), (70, 999, 10, 1),
+                               (0, 64, 0, 0), (40, DEPTH - 3, DEPTH - 4, 0)):
+    dut.u_mem.stall_pct.value = pct
+    trig = 0x0100 + pct
+    r = await h.capture(config(total, pre=pre, div=div, tlm=0xFFFF, tlv=trig))
+    d = r["data"]
+    assert len(d) == total and r["trigger"] == pre
+    assert r["end"] == (total, 0), r["end"]           # no overflow flag
+    check_steps(d, div + 1)
+    assert d[pre] == trig, hex(d[pre])
+    dut._log.info("stall %d%%: %d samples, pre %d ok", pct, total, pre)
+  assert int(dut.u_mem.errors.value) == 0
+  dut._log.info("AXI bursts: %d written, %d read", int(dut.u_mem.bursts_w.value),
+                int(dut.u_mem.bursts_r.value))

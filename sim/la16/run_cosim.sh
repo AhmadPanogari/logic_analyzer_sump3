@@ -5,6 +5,7 @@
 #   host/sigrok/libsigrok-la16-driver.patch and
 #   sim/ols/libsigrok-tcpraw-testharness.patch applied ( --enable-la16 ).
 #   SIGROK_CLI   default /opt/sigrok/bin/sigrok-cli
+#   USE_DDR=1    ring buffer through the AXI3 DDR model ( 262144 samples )
 set -u
 cd "$(dirname "$0")"
 CLI=${SIGROK_CLI:-/opt/sigrok/bin/sigrok-cli}
@@ -14,9 +15,12 @@ OUT=build_cosim
 mkdir -p $OUT
 export LA16_PORT=$PORT LA16_STOP_FILE=$PWD/$OUT/stop
 rm -f $LA16_STOP_FILE
-make -f Makefile.cosim > $OUT/sim.log 2>&1 &
+USE_DDR=${USE_DDR:-0}
+make -f Makefile.cosim USE_DDR=$USE_DDR > $OUT/sim.log 2>&1 &
 SIM=$!
 for i in $(seq 1 120); do grep -q LISTENING $OUT/sim.log 2>/dev/null && break; sleep 1; done
+grep -q LISTENING $OUT/sim.log || { echo "FAIL: simulation did not start, see $OUT/sim.log"; exit 1; }
+rm -f $OUT/cap.csv
 DEV="la16:conn=tcp-raw/127.0.0.1/$PORT"
 fail=0
 run() { echo "\$ sigrok-cli $*"; "$CLI" "$@" 2>&1; }
@@ -70,6 +74,12 @@ python3 $OUT/check.py $OUT/cap.csv 20 2000 200 "p&8 and not c&8" || fail=1
 echo "=== 8. full depth: 65536 samples at 200 MS/s"
 csv --config samplerate=200m --samples 65536
 python3 $OUT/check.py $OUT/cap.csv 1 65536 || fail=1
+
+if [ "$USE_DDR" = 1 ]; then
+  echo "=== 8b. DDR: 200000 samples at 200 MS/s, rising edge D15, ratio 30 %"
+  csv --config samplerate=200m:captureratio=30 --samples 200000 --triggers D15=r
+  python3 $OUT/check.py $OUT/cap.csv 1 200000 60000 "not p&0x8000 and c&0x8000" || fail=1
+fi
 
 echo "=== 9. three runs on one open connection ( PulseView pressing Run again )"
 PCDIR=$(dirname "$CLI")/../lib/pkgconfig

@@ -3,8 +3,12 @@
 SIM ?= icarus
 TOPLEVEL_LANG = verilog
 RTL = ../../rtl
-SIM_BUILD = sim_build_cosim
-VERILOG_SOURCES = $(PWD)/tb_la16_cosim.v $(RTL)/la16/la16_engine.v $(RTL)/la16/la16_capture.v
+USE_DDR ?= 0
+SIM_BUILD = sim_build_cosim_ddr$(USE_DDR)
+COMPILE_ARGS += -Ptb_la16_cosim.USE_DDR=$(USE_DDR)
+VERILOG_SOURCES = $(PWD)/tb_la16_cosim.v $(PWD)/axi3_mem_model.v \
+  $(addprefix $(RTL)/la16/, la16_engine.v la16_capture.v la16_front.v la16_seq.v \
+    la16_store_bram.v la16_store_ddr.v)
 COCOTB_TOPLEVEL = tb_la16_cosim
 COCOTB_TEST_MODULES = test_la16_cosim
 include $(shell cocotb-config --makefiles)/Makefile.sim
