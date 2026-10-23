@@ -700,6 +700,19 @@ END membawa flag *overflow* dan log PulseView menampilkannya.
 Verifikasi: `sim/la16` `make USE_DDR=1` (8/8, model AXI3 dengan jeda acak 30–70 %) dan
 `USE_DDR=1 ./run_cosim.sh` (driver asli, 200.000 sampel, trigger tepi naik tepat di posisi).
 
+### Varian `antminer_s9_la16eth`: DDR + Ethernet (dalam pengujian)
+
+Sama dengan `la16ddr` (200 MS/s, ring 251M sampel di DDR), tetapi protokol `la16` dilayani
+**program ARM lewat TCP** (Ethernet Gigabit S9), bukan lewat UART. ARM mengatur capture
+lewat register `la16_regs` (M_AXI_GP0, 0x43C0_0000) dan membaca hasil langsung dari DDR.
+Driver PulseView sama (`la16`), koneksi **Network / Raw TCP 192.168.1.10:5555**.
+Panduan build Vitis dan jaringan: `sw/la16_eth/README.md`.
+
+Verifikasi: `sim/la16` `make -f Makefile.eth` (register + ring DDR, AXI dengan jeda acak) dan
+`sw/la16_eth/test/run_host_test.sh` (kode server ARM yang sama di Linux + driver la16 asli
+lewat TCP: scan, 100k sampel dengan ring berputar, divider, trigger level/tepi, 2M sampel,
+Run berulang).
+
 ## Tes DDR board S9 (persiapan buffer DDR)
 
 Board S9 memakai 2× Samsung K4B2G1646F-BYMA (DDR3L 2 Gbit x16) = bus 32 bit, **512 MB**.

@@ -16,6 +16,9 @@
 #      DDR and MIO init are skipped, except for builds that keep the capture
 #      buffer in DDR ( antminer_s9_la16ddr, marked by <build_dir>/needs_ddr ):
 #      then MIO + s9_ddr_init.tcl ( U-Boot's S9 DDR values ) run as well.
+#      Ethernet builds ( antminer_s9_la16eth with <build_dir>/la16_eth.elf from
+#      sw/la16_eth/vitis_build.py ) also run the peripheral init ( UART ) and,
+#      after step 3, download and start the ARM program.
 #   3) runs ps7_post_config: enables the PS<->PL level shifters ( FCLK only
 #      reaches the PL after this ) and releases the FPGA resets
 #   4) reads the clock registers back and prints the FCLK0 frequency
@@ -94,10 +97,26 @@ if { [file exists "$build_dir/needs_ddr"] } {
     exit 1
   }
 }
+set app_elf "$build_dir/la16_eth.elf"
+if { [file exists $app_elf] } {
+  if { [catch { ps7_peripherals_init_data_$sfx } err] } {
+    puts "NOTE: peripheral init: $err"
+  }
+}
 configparams force-mem-accesses 0
 
 # 3) Level shifters on, FPGA resets released
 ps7_post_config
+
+# Ethernet build: start the la16 server on CPU #0
+if { [file exists $app_elf] } {
+  puts "Starting ARM program $app_elf"
+  dow $app_elf
+  con
+  set ip_file "$build_dir/la16_eth_ip.txt"
+  set ip [expr { [file exists $ip_file] ? [string trim [read [open $ip_file]]] : "192.168.1.10" }]
+  puts "la16 server: TCP $ip port 5555 ( PulseView: driver la16, Network / Raw TCP )"
+}
 
 # 4) Verify FCLK0
 proc bits { v hi lo } { return [expr { ($v >> $lo) & ((1 << ($hi - $lo + 1)) - 1) }] }
@@ -130,6 +149,7 @@ if { !$locked || abs( $fclk0 - 100.0 ) > 0.5 || ( $lvl_shftr & 0xF ) != 0xF } {
   puts "    Next: python host/la.py server --port <COM>  and  python host/la.py gui"
 }
 
-# The CPU stays halted in JTAG mode, which is fine: the PL only needs FCLK0.
+# Without an ARM program the CPU stays halted, which is fine: the PL only
+# needs FCLK0.
 disconnect
 exit

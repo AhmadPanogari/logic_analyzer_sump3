@@ -20,3 +20,4 @@ sim/la16/results.xml
 sim/la16/*.log
 sim/la16/sim_build*/
 sim/la16/build_cosim/
+sw/la16_eth/test/build/

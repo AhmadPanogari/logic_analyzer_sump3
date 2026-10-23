@@ -1,0 +1,109 @@
+"""
+Build the ARM program of the antminer_s9_la16eth bitstream with Vitis 2025.x
+( unified, Python scripting ):
+
+  vitis -s sw/la16_eth/vitis_build.py [xsa] [--ip 192.168.1.10]
+
+  xsa   default vivado/build_antminer_s9_la16eth/la_top.xsa
+  --ip  static board IP ( netmask 255.255.255.0, gateway x.x.x.1 ),
+        default 192.168.1.10
+
+Steps: platform from the XSA ( standalone, ps7_cortexa9_0 ) with lwip220
+( RAW API, static IP, 1 Gbit/s fixed link: the S9 PHY is a Broadcom part the
+lwIP PHY code does not know, the fixed setting only uses IEEE registers ),
+then the "lwIP Echo Server" template app with echo.c replaced by
+la16_server.c. The ELF is copied next to the XSA as la16_eth.elf, where
+vivado/s9_jtag_load.tcl downloads and starts it.
+"""
+import os
+import re
+import shutil
+import sys
+
+import vitis
+
+here = os.path.dirname(os.path.abspath(__file__))
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+ip = "192.168.1.10"
+if "--ip" in sys.argv:
+    ip = sys.argv[sys.argv.index("--ip") + 1]
+    args = [a for a in args if a != ip]
+xsa = os.path.abspath(args[0]) if args else os.path.normpath(
+    os.path.join(here, "../../vivado/build_antminer_s9_la16eth/la_top.xsa"))
+if not os.path.isfile(xsa):
+    sys.exit("ERROR: %s not found. Build first: build.bat antminer_s9_la16eth" % xsa)
+octets = [int(x) for x in ip.split(".")]
+if len(octets) != 4:
+    sys.exit("ERROR: --ip a.b.c.d")
+
+out_dir = os.path.dirname(xsa)
+ws = os.path.join(out_dir, "vitis_ws")
+if os.path.exists(ws):
+    shutil.rmtree(ws)
+print("XSA      :", xsa)
+print("Workspace:", ws)
+print("Board IP :", ip)
+
+client = vitis.create_client()
+client.set_workspace(path=ws)
+
+domain_name = "standalone_ps7_cortexa9_0"
+platform = client.create_platform_component(
+    name="s9_platform", hw_design=xsa, os="standalone",
+    cpu="ps7_cortexa9_0", domain_name=domain_name)
+domain = platform.get_domain(name=domain_name)
+domain.set_lib(lib_name="lwip220")
+for param, value in (("lwip220_api_mode", "RAW_API"),
+                     ("lwip220_dhcp", "false"),
+                     ("lwip220_temac_phy_link_speed", "CONFIG_LINKSPEED1000"),
+                     ("lwip220_tcp_snd_buf", "32768"),
+                     ("lwip220_tcp_wnd", "16384"),
+                     ("lwip220_mem_size", "262144"),
+                     ("lwip220_memp_n_tcp_seg", "1024"),
+                     ("lwip220_pbuf_pool_size", "2048")):
+    try:
+        domain.set_config(option="lib", param=param, value=value, lib_name="lwip220")
+        print("lwip220: %s = %s" % (param, value))
+    except Exception as e:                      # keep going, report at the end
+        print("NOTE: lwip220 %s not set: %s" % (param, e))
+platform.build()
+
+xpfm = os.path.join(ws, "s9_platform", "export", "s9_platform", "s9_platform.xpfm")
+app = client.create_app_component(name="la16_eth", platform=xpfm,
+                                  domain=domain_name, template="lwip_echo_server")
+
+src = os.path.join(ws, "la16_eth", "src")
+echo = os.path.join(src, "echo.c")
+if os.path.exists(echo):
+    os.remove(echo)
+shutil.copy(os.path.join(here, "la16_server.c"), src)
+
+# Static IP of the template's main.c
+main_c = os.path.join(src, "main.c")
+with open(main_c) as f:
+    text = f.read()
+text, n = re.subn(r"IP4_ADDR\(&ipaddr,\s*\d+,\s*\d+,\s*\d+,\s*\d+\)",
+                  "IP4_ADDR(&ipaddr, %d, %d, %d, %d)" % tuple(octets), text)
+text = re.sub(r"IP4_ADDR\(&gw,\s*\d+,\s*\d+,\s*\d+,\s*\d+\)",
+              "IP4_ADDR(&gw, %d, %d, %d, 1)" % tuple(octets[:3]), text)
+with open(main_c, "w") as f:
+    f.write(text)
+print("main.c: static IP set ( %d place%s )" % (n, "" if n == 1 else "s"))
+
+app.build()
+
+elf = None
+for root, _, files in os.walk(os.path.join(ws, "la16_eth")):
+    if "la16_eth.elf" in files:
+        elf = os.path.join(root, "la16_eth.elf")
+if not elf:
+    sys.exit("ERROR: la16_eth.elf not produced, see the build output above")
+shutil.copy(elf, os.path.join(out_dir, "la16_eth.elf"))
+with open(os.path.join(out_dir, "la16_eth_ip.txt"), "w") as f:
+    f.write(ip + "\n")
+print("=" * 70)
+print(" ELF : %s" % os.path.join(out_dir, "la16_eth.elf"))
+print(" Next: s9_jtag_load.bat %s" % out_dir)
+print(" PulseView: driver la16, Network ( Raw TCP ) %s port 5555" % ip)
+print("=" * 70)
+vitis.dispose()
