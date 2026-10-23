@@ -665,9 +665,13 @@ vivado -mode batch -source build.tcl -tclargs antminer_s9_la16
 ## Tes DDR board S9 (persiapan buffer DDR)
 
 Board S9 memakai 2× Samsung K4B2G1646F-BYMA (DDR3L 2 Gbit x16) = bus 32 bit, **512 MB**.
-`vivado/build.tcl` mengatur PS7 untuk chip ini (setara MT41K128M16 JT-125, 533 MHz,
-training otomatis). `vivado/s9_ddr_test.tcl` menginisialisasi DDR lewat JTAG lalu
-menguji controller, bus data, bus alamat (aliasing), dan 8 blok acak di seluruh 512 MB:
+Preset DDR Vivado di `vivado/build.tcl` **tidak jalan** di board ini (bit data bergeser).
+DDR diinisialisasi dengan nilai register U-Boot untuk Antminer S9
+(`board/bitmain/antminer_s9/.../ps7_init_gpl.c`, GPL-2.0): `vivado/s9_ddr_init.tcl`
+(buffer I/O DDR, VREF internal, DCI, PLL/clock DDR 533 MHz, controller, dan nilai training
+per byte lane untuk PCB S9). `vivado/s9_ddr_test.tcl` menjalankan MIO/PLL/clock dari
+`ps7_init.tcl` + `s9_ddr_init`, lalu menguji controller, bus data, bus alamat (aliasing),
+dan 8 blok acak di seluruh 512 MB:
 
 ```powershell
 cd vivado

@@ -105,7 +105,9 @@ if { $use_ps } {
   # S9 DDR: 2x Samsung K4B2G1646F-BYMA ( DDR3L, 2 Gbit x16 each ) = 32 bit, 512 MB.
   # Same geometry as Vivado's MT41K128M16 JT-125 ( 8 banks, 14 rows, 10 cols ).
   # 533 MHz is the -1 speed grade limit; the chips are DDR3L-1866 parts.
-  # Used by s9_ddr_test.tcl only, s9_jtag_load.tcl still skips DDR init.
+  # NOTE: on the board these presets give corrupted data. The DDR is set up
+  # with U-Boot's S9 register values instead ( s9_ddr_init.tcl ); these
+  # settings only keep the PS7 block consistent.
   set_property -dict [list \
     CONFIG.PCW_UIPARAM_DDR_MEMORY_TYPE      {DDR 3 (Low Voltage)} \
     CONFIG.PCW_UIPARAM_DDR_PARTNO           {MT41K128M16 JT-125} \

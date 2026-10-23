@@ -11,9 +11,11 @@
 # Board DDR: 2x Samsung K4B2G1646F-BYMA ( DDR3L 2 Gbit x16 ) = 32 bit, 512 MB,
 # CPU address 0x00000000 .. 0x1FFFFFFF ( the first 1 MB is skipped: OCM ).
 #
-# Steps: system reset, MIO + PLL + clock + DDR init from ps7_init.tcl ( the
-# order of ps7_init; the MIO part also sets up the DDR I/O buffers ( DDRIOB )
-# and runs the DCI calibration, without it DDR accesses hang ), then
+# Steps: system reset, MIO + PLL + clock init from ps7_init.tcl, then the
+# DDR init of s9_ddr_init.tcl ( register values of U-Boot's Antminer S9
+# board: DDR I/O buffers, internal VREF, DCI, DDR PLL/clock, controller and
+# PHY training values for this PCB; Vivado's DDR presets fail on the board ),
+# then
 #   1) DDR controller status
 #   2) data bus walking ones ( 32 bit )
 #   3) address bus ( aliasing between all power of two offsets, finds missing
@@ -61,18 +63,15 @@ switch -- $si_ver {
   "2.0"   { set sfx 2_0 }
   default { set sfx 3_0 }
 }
-if { [llength [info procs ps7_ddr_init_data_$sfx]] == 0 } {
-  puts "ERROR: ps7_ddr_init_data_$sfx missing in $init ( DDR disabled in the PS7 block? )"
-  exit 1
-}
-puts "Zynq silicon $si_ver : MIO ( incl. DDR I/O + DCI ), PLL, clock and DDR init"
+source "$script_dir/s9_ddr_init.tcl"
+puts "Zynq silicon $si_ver : MIO, PLL and clock init ( ps7_init.tcl ), DDR init ( s9_ddr_init.tcl )"
 if { [catch { ps7_mio_init_data_$sfx } err] } {
   puts "ERROR: MIO / DDR I/O init failed: $err"
   exit 1
 }
 ps7_pll_init_data_$sfx
 ps7_clock_init_data_$sfx
-if { [catch { ps7_ddr_init_data_$sfx } err] } {
+if { [catch { s9_ddr_init } err] } {
   puts "ERROR: DDR init failed: $err"
   exit 1
 }
