@@ -374,14 +374,26 @@ python host/la.py gui
 ### Alur capture
 
 1. Di sump3.py klik **Acquisition → Connect**. Panel kanan bawah menampilkan info
-   hardware (hub `ck100_hub`, pod `probe_pod` & `debug_pod`).
-2. Pilih view **probes** (dan/atau **debug**) untuk window yang tampil.
-3. Atur trigger: klik teks *Trig Type* (mis. `or_rising`), pilih sinyal (merah) lalu
-   **Set_Trigs**. Posisi trigger diatur lewat baris `Trig Pos` (klik, lalu scroll/panah)
-   atau `sump_trigger_location` di `host/work/sump3.ini`. Pilihan di GUI berkelipatan 25 %
-   (0/25/50/75/100) dan dipetakan ke posisi RLE pod 10/25/50/75/90 %: **0 % = trigger di
-   dekat awal buffer** (sebagian besar data sesudah trigger), 100 % = di dekat akhir.
-4. Klik **Acquire** (arm + tunggu trigger + download).
+   hardware (hub `ck100_hub`, pod `probe_pod` & `debug_pod`). Window waveform masih
+   **kosong**: view belum ditampilkan.
+2. **Tampilkan view.** Klik sekali di dalam window waveform (agar window terpilih), lalu
+   **ViewConfig** → pilih `probes` di daftar bawah → **Apply** (atau **ApplyAll** untuk
+   `probes` + `debug`). Lewat bd_shell: `apply_view_all`. Tanpa langkah ini tidak ada
+   sinyal yang bisa dijadikan trigger atau diekspor.
+3. **Pasang trigger** (menu **Acquisition**):
+   * Klik nama sinyal, mis. `D0` (warna oranye = bisa jadi trigger) sampai **kuning**, lalu
+     **Set_Trigs** sekali. Sinyal jadi **merah**, muncul di *Trigger List*, `Num Trigs = 1`.
+     Set_Trigs bersifat toggle: klik dua kali = batal. Lewat bd_shell:
+     `sump_clear_trigs` lalu `sump_set_trigs D0`.
+   * **Trig Type**: klik baris teks `Trig Type = ...` di panel kanan bawah, lalu scroll
+     mouse / panah: `or_rising`, `or_falling`, `and_rising`, `and_falling`, ...
+   * **Trig Pos**: klik barisnya lalu scroll. Pilihan di GUI berkelipatan 25 %
+     (0/25/50/75/100) dan dipetakan ke posisi RLE pod 10/25/50/75/90 %: **0 % = trigger
+     di dekat awal buffer** (sebagian besar data sesudah trigger), 100 % = di dekat akhir.
+   * Alternatif: `sump_trigger_type` / `sump_trigger_location` di `host/work/sump3.ini`
+     (saat sump3.py tertutup).
+4. Klik **Acquire** (arm + tunggu trigger + download). Jika tertahan di *Waiting for
+   trigger*: cek *Trigger List* tidak kosong; **Force_Trig** memaksa capture.
 5. Klik **Save_VCD** → PulseView terbuka dengan channel `D0..D15`
    (dan `demo_cnt[0..23]`, `mesa_rx`, `mesa_tx`, ... dari debug pod).
 6. Di PulseView tambahkan decoder, mis. UART pada `D0` @115200, SPI pada `D1..D4`.
@@ -389,6 +401,18 @@ python host/la.py gui
 Catatan: `save_vcd` hanya mengekspor sinyal yang ada di window sump3.py; kalau ada
 sinyal yang di-*select*, hanya sinyal itu yang diekspor. Jika ada dua kursor aktif,
 VCD dipotong di antara kursor.
+
+### Status verifikasi di hardware
+
+Diuji pada **board kontrol Antminer S9**, JTAG lewat **FT2232H CJMCU** (`program_ftdi`),
+Vivado 2025.2, Windows:
+
+| Langkah | Hasil |
+|---|---|
+| `s9_jtag_load.tcl` (XSDB) | PL terprogram, FCLK0 100 MHz |
+| Connect sump3.py ↔ bd_server ↔ MesaBus UART | `ck100_hub 100 MHz`, `probe_pod 4096x48`, `debug_pod 2048x64` |
+| Pola uji, trigger `or_falling` D0, Trig Pos 0 % | Capture −169 µs … +3,2 ms |
+| Save_VCD → PulseView, decoder UART D0 @115200 | `Hello SUMP3 PulseView\r\n` terbaca utuh; pulsa 10 ns D14 tiap 1 ms tertangkap |
 
 ### Konversi manual
 
