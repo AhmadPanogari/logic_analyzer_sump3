@@ -377,7 +377,10 @@ python host/la.py gui
    hardware (hub `ck100_hub`, pod `probe_pod` & `debug_pod`).
 2. Pilih view **probes** (dan/atau **debug**) untuk window yang tampil.
 3. Atur trigger: klik teks *Trig Type* (mis. `or_rising`), pilih sinyal (merah) lalu
-   **Set_Trigs**. Posisi trigger diatur lewat `sump_trigger_location` (persen).
+   **Set_Trigs**. Posisi trigger diatur lewat baris `Trig Pos` (klik, lalu scroll/panah)
+   atau `sump_trigger_location` di `host/work/sump3.ini`. Pilihan di GUI berkelipatan 25 %
+   (0/25/50/75/100) dan dipetakan ke posisi RLE pod 10/25/50/75/90 %: **0 % = trigger di
+   dekat awal buffer** (sebagian besar data sesudah trigger), 100 % = di dekat akhir.
 4. Klik **Acquire** (arm + tunggu trigger + download).
 5. Klik **Save_VCD** → PulseView terbuka dengan channel `D0..D15`
    (dan `demo_cnt[0..23]`, `mesa_rx`, `mesa_tx`, ... dari debug pod).

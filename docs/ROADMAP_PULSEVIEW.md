@@ -83,7 +83,7 @@ bridge menerjemahkan perintahnya ke SUMP3 lewat `sump3_client.py`.
 |---|---|
 | Samplerate | SUMP3 selalu merekam RLE pada `clk_cap` 100 MHz. Bridge me-resample hasil RLE ke samplerate yang diminta |
 | Jumlah sampel | Panjang jendela waktu yang dikirim. Data di luar jendela dibuang |
-| Posisi trigger (delay count) | Dibulatkan ke posisi SUMP3 yang tersedia: 10 / 25 / 50 / 75 / 90 % |
+| Posisi trigger (delay count) | Dibulatkan ke posisi RLE pod yang tersedia: 10 / 25 / 50 / 75 / 90 % (di GUI sump3.py tampil sebagai 0/25/50/75/100) |
 | Trigger mask/value | SUMP3 punya `or_rising`, `or_falling`, `and_rising`, `and_falling` (+ eksternal/analog). Trigger OLS berbasis level/pola: pemetaan harus didefinisikan dan didokumentasikan (mis. pola → `and_rising` pada bit yang di-mask) |
 | Run tanpa trigger | Arm lalu `force_trig` |
 | Channel | Maks. 32: D0–D15 dari `probe_pod` + 16 sinyal dari `debug_pod` (atau pod lain yang dipilih lewat argumen bridge) |
