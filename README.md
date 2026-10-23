@@ -568,7 +568,8 @@ selesai" (0,1 s, 0 sampel). Patch `host/sigrok/libsigrok-ols-rx-robust.patch`
 membaca per blok, mengabaikan pembacaan kosong, dan menghitung transfer hanya jika byte
 benar-benar diterima. Di co-sim dengan fault injection (setiap pembacaan ke-3 kosong),
 driver asli menghasilkan 0 byte di setiap Run, sedangkan driver ber-patch selalu lengkap.
-Patch ini perlu build PulseView sendiri (atau masuk ke upstream sigrok).
+Patch ini perlu build PulseView sendiri (panduan: `docs/BUILD_PULSEVIEW_WINDOWS.md`) atau
+masuk ke upstream sigrok.
 
 Saran sampai ada PulseView ber-patch: pakai **115200**, Log level default, dan **sambungkan
 ulang perangkat** (Connect → Scan → OK) sebelum setiap Run, atau pakai
