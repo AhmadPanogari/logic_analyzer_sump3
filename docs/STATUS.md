@@ -39,6 +39,7 @@ Prototipe: board kontrol Antminer S9 bekas (Zynq XC7Z010-1CLG400, DDR3L 512 MB,
 | Server ARM `sw/la16_eth/la16_server.c` (lwIP RAW, TCP 5555) | ✅ uji host (`sw/la16_eth/test/`) |
 | `la16_eth.elf` lewat `vitis_build.py` (Vitis 2024.2, workspace `D:\la16ws`) | ✅ build 24-10-2026 |
 | Ethernet S9: link + `ping 192.168.1.10` dari laptop (kabel langsung) | ✅ board 24-10-2026 |
+| PulseView Windows menemukan la16 lewat Raw TCP (installer dengan `libsigrok-tcp-win32-readable.patch`) | ✅ board 24-10-2026 |
 
 ## Sedang dikerjakan
 
