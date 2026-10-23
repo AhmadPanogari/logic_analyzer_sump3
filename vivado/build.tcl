@@ -5,6 +5,7 @@
 #   vivado -mode batch -source build.tcl -tclargs antminer_s9
 #   vivado -mode batch -source build.tcl -tclargs antminer_s9_ols
 #   vivado -mode batch -source build.tcl -tclargs antminer_s9_la16
+#   vivado -mode batch -source build.tcl -tclargs antminer_s9_la16ddr
 #   vivado -mode batch -source build.tcl -tclargs zybo_z7_10
 #   vivado -mode batch -source build.tcl -tclargs arty_z7_10
 #
@@ -22,6 +23,8 @@
 #                            no SUMP3/MesaBus, uses constraints/antminer_s9.xdc )
 #   antminer_s9_la16      -> la_top_s9_la16 ( same board, own la16 protocol and
 #                            libsigrok driver, 200 MS/s, docs/PROTOCOL_LA16.md )
+#   antminer_s9_la16ddr   -> la_top_s9_la16ddr ( la16 with the ring buffer in the
+#                            PS DDR through S_AXI_HP0, 251M samples )
 #   zybo_z7_10/arty_z7_10 -> la_top    ( clock = 125 MHz PL oscillator, PL only )
 # -----------------------------------------------------------------------------
 set board  [expr { [llength $argv] > 0 ? [lindex $argv 0] : "antminer_s9" }]
@@ -33,7 +36,7 @@ set out_dir    "$script_dir/build_$board"
 # Variants "<board>_ols" / "<board>_la16" use the base board pins with the
 # OLS or la16 engine instead of SUMP3
 set variant ""
-foreach v { ols la16 } {
+foreach v { ols la16 la16ddr } {
   if { [string match "*_$v" $board] } { set variant $v }
 }
 set ols_variant [expr { $variant ne "" }]
@@ -120,6 +123,13 @@ if { $use_ps } {
     CONFIG.PCW_UIPARAM_DDR_TRAIN_READ_GATE  {1} \
     CONFIG.PCW_UIPARAM_DDR_TRAIN_DATA_EYE   {1} \
   ] $ps7
+  if { $variant eq "la16ddr" } {
+    # Capture ring buffer in DDR: 64 bit AXI3 HP0 slave, clocked by FCLK_CLK0
+    set_property -dict [list \
+      CONFIG.PCW_USE_S_AXI_HP0       {1}  \
+      CONFIG.PCW_S_AXI_HP0_DATA_WIDTH {64} \
+    ] $ps7
+  }
   puts "PS7 DDR: [get_property CONFIG.PCW_UIPARAM_DDR_MEMORY_TYPE $ps7],\
  [get_property CONFIG.PCW_UIPARAM_DDR_PARTNO $ps7],\
  [get_property CONFIG.PCW_UIPARAM_DDR_BUS_WIDTH $ps7],\
@@ -133,6 +143,28 @@ if { $use_ps } {
   connect_bd_intf_net [get_bd_intf_ports FIXED_IO] [get_bd_intf_pins ps7/FIXED_IO]
   connect_bd_net      [get_bd_ports FCLK_CLK0]     [get_bd_pins ps7/FCLK_CLK0]
   connect_bd_net      [get_bd_ports FCLK_RESET0_N] [get_bd_pins ps7/FCLK_RESET0_N]
+  if { $variant eq "la16ddr" } {
+    create_bd_intf_port -mode Slave -vlnv xilinx.com:interface:aximm_rtl:1.0 S_AXI_HP0
+    set hp [get_bd_intf_ports S_AXI_HP0]
+    foreach { k v } {
+      PROTOCOL AXI3  DATA_WIDTH 64  ADDR_WIDTH 32  ID_WIDTH 6  FREQ_HZ 100000000
+      HAS_REGION 0  HAS_QOS 1  HAS_LOCK 1  HAS_CACHE 1  HAS_PROT 1  HAS_BURST 1
+      HAS_WSTRB 1  HAS_BRESP 1  HAS_RRESP 1  MAX_BURST_LENGTH 16
+    } {
+      if { [catch { set_property CONFIG.$k $v $hp } err] } {
+        puts "NOTE: S_AXI_HP0 $k not set ( $err )"
+      }
+    }
+    connect_bd_intf_net [get_bd_intf_ports S_AXI_HP0] [get_bd_intf_pins ps7/S_AXI_HP0]
+    connect_bd_net [get_bd_pins ps7/FCLK_CLK0] [get_bd_pins ps7/S_AXI_HP0_ACLK]
+    set_property CONFIG.ASSOCIATED_BUSIF {S_AXI_HP0} [get_bd_ports FCLK_CLK0]
+    assign_bd_address -target_address_space [get_bd_addr_spaces S_AXI_HP0] \
+      [get_bd_addr_segs ps7/S_AXI_HP0/HP0_DDR_LOWOCM] -force
+    puts "HP0 address map:"
+    foreach seg [get_bd_addr_segs -of_objects [get_bd_addr_spaces S_AXI_HP0]] {
+      puts "  $seg offset [get_property OFFSET $seg] range [get_property RANGE $seg]"
+    }
+  }
 
   validate_bd_design
   save_bd_design
@@ -164,13 +196,20 @@ if { $variant eq "ols" } {
   read_verilog "$root/rtl/ols/ols_engine.v"
   read_verilog "$root/rtl/ols/la_ols_core.v"
   read_verilog "$root/rtl/ols/la_top_s9_ols.v"
-} elseif { $variant eq "la16" } {
+} elseif { $variant eq "la16" || $variant eq "la16ddr" } {
   # la16 engine ( own protocol and libsigrok driver, own RTL )
   read_verilog "$root/rtl/ols/ols_uart.v"
-  read_verilog "$root/rtl/la16/la16_capture.v"
-  read_verilog "$root/rtl/la16/la16_engine.v"
-  read_verilog "$root/rtl/la16/la16_core.v"
-  read_verilog "$root/rtl/la16/la_top_s9_la16.v"
+  foreach f { la16_front la16_seq la16_store_bram la16_store_ddr la16_capture
+              la16_engine la16_core } {
+    read_verilog "$root/rtl/la16/$f.v"
+  }
+  read_verilog "$root/rtl/la16/la_top_s9_$variant.v"
+  if { $variant eq "la16ddr" } {
+    # Tells s9_jtag_load.tcl to initialize the DDR ( s9_ddr_init.tcl )
+    set fh [open "$out_dir/needs_ddr" w]
+    puts $fh "ring buffer in PS DDR via S_AXI_HP0"
+    close $fh
+  }
 } else {
   read_verilog "$root/rtl/la_core.v"
   read_verilog "$root/rtl/la_sump3.v"

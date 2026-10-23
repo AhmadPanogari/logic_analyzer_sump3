@@ -13,8 +13,9 @@
 # in JTAG boot mode nobody starts the PS clocks. This script:
 #   1) resets the system and loads la_top.bit into the PL
 #   2) runs only the PLL and clock parts of ps7_init.tcl ( from build.tcl ).
-#      DDR and MIO init are skipped: the logic analyzer does not use them, and
-#      the block design's DDR settings are not tuned for this board.
+#      DDR and MIO init are skipped, except for builds that keep the capture
+#      buffer in DDR ( antminer_s9_la16ddr, marked by <build_dir>/needs_ddr ):
+#      then MIO + s9_ddr_init.tcl ( U-Boot's S9 DDR values ) run as well.
 #   3) runs ps7_post_config: enables the PS<->PL level shifters ( FCLK only
 #      reaches the PL after this ) and releases the FPGA resets
 #   4) reads the clock registers back and prints the FCLK0 frequency
@@ -78,6 +79,21 @@ switch -- $si_ver {
 puts "Zynq silicon $si_ver : ps7_pll_init_data_$sfx + ps7_clock_init_data_$sfx"
 ps7_pll_init_data_$sfx
 ps7_clock_init_data_$sfx
+if { [file exists "$build_dir/needs_ddr"] } {
+  source "$script_dir/s9_ddr_init.tcl"
+  puts "DDR capture buffer: MIO + DDR init ( s9_ddr_init.tcl )"
+  ps7_mio_init_data_$sfx
+  if { [catch { s9_ddr_init } err] } {
+    puts "ERROR: DDR init failed: $err"
+    exit 1
+  }
+  set ddr_sts [mrd -force -value 0xF8006054]
+  puts [format " DDRC mode_sts_reg = 0x%08X ( bits 2..0 = 1 expected )" $ddr_sts]
+  if { ( $ddr_sts & 7 ) != 1 } {
+    puts "ERROR: DDR controller not in normal mode, run s9_ddr_test.tcl"
+    exit 1
+  }
+}
 configparams force-mem-accesses 0
 
 # 3) Level shifters on, FPGA resets released

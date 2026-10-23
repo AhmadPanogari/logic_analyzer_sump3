@@ -674,6 +674,27 @@ cd vivado
 vivado -mode batch -source build.tcl -tclargs antminer_s9_la16
 ```
 
+### Varian `antminer_s9_la16ddr`: buffer capture di DDR (251M sampel)
+
+Sama dengan `antminer_s9_la16` (protokol, driver, pin, LED, jumper), tetapi ring buffer
+ada di **DDR milik PS**: 0x0200_0000–0x1FFF_FFFF (480 MB = 251.658.240 sampel; 32 MB
+pertama disisakan untuk software PS di tahap Ethernet). PL menulis lewat **S_AXI_HP0**
+(64 bit, FCLK_CLK0 100 MHz): 4 sampel per word, burst 16 beat, FIFO 1024 word, beberapa
+burst sekaligus (200 MS/s = 400 MB/s). Upload dibaca balik lewat HP0 yang sama.
+
+```powershell
+cd vivado
+build.bat antminer_s9_la16ddr
+s9_jtag_load.bat build_antminer_s9_la16ddr     # menjalankan juga s9_ddr_init ( needs_ddr )
+```
+
+Batas praktis saat ini adalah **upload lewat UART** (921600 ≈ 45 ribu sampel/s): 1M sampel
+±22 s, 10M sampel ±4 menit. Tahap berikutnya: Ethernet. Kalau FIFO DDR pernah penuh,
+END membawa flag *overflow* dan log PulseView menampilkannya.
+
+Verifikasi: `sim/la16` `make USE_DDR=1` (8/8, model AXI3 dengan jeda acak 30–70 %) dan
+`USE_DDR=1 ./run_cosim.sh` (driver asli, 200.000 sampel, trigger tepi naik tepat di posisi).
+
 ## Tes DDR board S9 (persiapan buffer DDR)
 
 Board S9 memakai 2× Samsung K4B2G1646F-BYMA (DDR3L 2 Gbit x16) = bus 32 bit, **512 MB**.

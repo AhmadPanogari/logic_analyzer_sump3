@@ -15,6 +15,7 @@
 --     uart_rx/tx      : to the USB-UART, 8N1
 --     led[3:0]        : active high. 0 heartbeat, 1 armed ( prefill or
 --                       waiting for trigger ), 2 test pattern, 3 UART RX
+--     m_*             : AXI3 master to the PS DDR ( USE_DDR = 1, S_AXI_HP0 )
 -- Language:    Verilog-2001
 -- ***************************************************************************/
 `timescale 1 ns/ 100 ps
@@ -22,7 +23,12 @@
 
 module la16_core
 #(
-  parameter DEPTH_BITS = 16                  // 64K samples in BRAM
+  parameter        USE_DDR     = 0,
+  parameter        W           = USE_DDR ? 28 : 16,
+  // DDR ring 0x0200_0000 .. 0x1FFF_FFFF ( 480 MB ), the first 32 MB are
+  // left for PS software ( Ethernet stage )
+  parameter        MAX_SAMPLES = USE_DDR ? 251_658_240 : 65536,
+  parameter [31:0] DDR_BASE    = 32'h0200_0000
 )
 (
   input  wire         clk_100m,
@@ -32,7 +38,46 @@ module la16_core
   input  wire [1:0]   baud_sel,
   input  wire         uart_rx,
   output wire         uart_tx,
-  output reg  [3:0]   led
+  output reg  [3:0]   led,
+
+  output wire [31:0]  m_awaddr,
+  output wire [3:0]   m_awlen,
+  output wire [2:0]   m_awsize,
+  output wire [1:0]   m_awburst,
+  output wire [1:0]   m_awlock,
+  output wire [3:0]   m_awcache,
+  output wire [2:0]   m_awprot,
+  output wire [3:0]   m_awqos,
+  output wire [5:0]   m_awid,
+  output wire         m_awvalid,
+  input  wire         m_awready,
+  output wire [63:0]  m_wdata,
+  output wire [7:0]   m_wstrb,
+  output wire         m_wlast,
+  output wire [5:0]   m_wid,
+  output wire         m_wvalid,
+  input  wire         m_wready,
+  input  wire [1:0]   m_bresp,
+  input  wire [5:0]   m_bid,
+  input  wire         m_bvalid,
+  output wire         m_bready,
+  output wire [31:0]  m_araddr,
+  output wire [3:0]   m_arlen,
+  output wire [2:0]   m_arsize,
+  output wire [1:0]   m_arburst,
+  output wire [1:0]   m_arlock,
+  output wire [3:0]   m_arcache,
+  output wire [2:0]   m_arprot,
+  output wire [3:0]   m_arqos,
+  output wire [5:0]   m_arid,
+  output wire         m_arvalid,
+  input  wire         m_arready,
+  input  wire [63:0]  m_rdata,
+  input  wire [1:0]   m_rresp,
+  input  wire [5:0]   m_rid,
+  input  wire         m_rlast,
+  input  wire         m_rvalid,
+  output wire         m_rready
 );
 
   reg  [3:0]    reset_sr = 4'hF;
@@ -112,7 +157,8 @@ ols_uart_tx u_uart_tx
   .tx           ( uart_tx         )
 );
 
-la16_engine #( .DEPTH_BITS ( DEPTH_BITS ), .CLK_HZ ( 100_000_000 ),
+la16_engine #( .W ( W ), .MAX_SAMPLES ( MAX_SAMPLES ), .USE_DDR ( USE_DDR ),
+               .DDR_BASE ( DDR_BASE ), .CLK_HZ ( 100_000_000 ),
                .BASE_HZ ( 200_000_000 ) ) u_la16_engine
 (
   .clk          ( clk_100m        ),
@@ -125,7 +171,20 @@ la16_engine #( .DEPTH_BITS ( DEPTH_BITS ), .CLK_HZ ( 100_000_000 ),
   .tx_valid     ( tx_valid        ),
   .tx_ready     ( tx_ready        ),
   .armed        ( armed           ),
-  .busy         ( busy            )
+  .busy         ( busy            ),
+  .m_awaddr  ( m_awaddr  ), .m_awlen   ( m_awlen   ), .m_awsize  ( m_awsize  ),
+  .m_awburst ( m_awburst ), .m_awlock  ( m_awlock  ), .m_awcache ( m_awcache ),
+  .m_awprot  ( m_awprot  ), .m_awqos   ( m_awqos   ), .m_awid    ( m_awid    ),
+  .m_awvalid ( m_awvalid ), .m_awready ( m_awready ), .m_wdata   ( m_wdata   ),
+  .m_wstrb   ( m_wstrb   ), .m_wlast   ( m_wlast   ), .m_wid     ( m_wid     ),
+  .m_wvalid  ( m_wvalid  ), .m_wready  ( m_wready  ), .m_bresp   ( m_bresp   ),
+  .m_bid     ( m_bid     ), .m_bvalid  ( m_bvalid  ), .m_bready  ( m_bready  ),
+  .m_araddr  ( m_araddr  ), .m_arlen   ( m_arlen   ), .m_arsize  ( m_arsize  ),
+  .m_arburst ( m_arburst ), .m_arlock  ( m_arlock  ), .m_arcache ( m_arcache ),
+  .m_arprot  ( m_arprot  ), .m_arqos   ( m_arqos   ), .m_arid    ( m_arid    ),
+  .m_arvalid ( m_arvalid ), .m_arready ( m_arready ), .m_rdata   ( m_rdata   ),
+  .m_rresp   ( m_rresp   ), .m_rid     ( m_rid     ), .m_rlast   ( m_rlast   ),
+  .m_rvalid  ( m_rvalid  ), .m_rready  ( m_rready  )
 );
 
 

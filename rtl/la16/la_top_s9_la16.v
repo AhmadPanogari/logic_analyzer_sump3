@@ -122,7 +122,10 @@ la16_core u_la16_core
   .baud_sel     ( ~baud_sel_n          ),
   .uart_rx      ( bd_rx                ),
   .uart_tx      ( bd_tx                ),
-  .led          ( led[3:0]             )
+  .led          ( led[3:0]             ),
+  .m_awready ( 1'b0 ), .m_wready ( 1'b0 ), .m_bresp ( 2'b00 ), .m_bid ( 6'd0 ),
+  .m_bvalid  ( 1'b0 ), .m_arready ( 1'b0 ), .m_rdata ( 64'd0 ), .m_rresp ( 2'b00 ),
+  .m_rid     ( 6'd0 ), .m_rlast ( 1'b0 ), .m_rvalid ( 1'b0 )
 );// u_la16_core
 
   assign led_n = ~led;
