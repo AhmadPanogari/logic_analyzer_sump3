@@ -47,6 +47,7 @@ Di PulseView semua protocol decoder (UART, SPI, I2C, dll.) bisa langsung dipakai
 | `host/sump3_vcd2sr.py` | Konverter VCD SUMP3 → sigrok `.sr` + buka PulseView |
 | `host/s9_load_bitstream.sh` | Dijalankan di Linux board S9: muat bitstream lewat FPGA manager |
 | `docs/ROADMAP_PULSEVIEW.md` | Rencana pengembangan: PulseView sebagai GUI utama |
+| `docs/PRODUCT_PLAN.md` | Draf rencana produk logic analyzer consumer |
 | `sim/` | Testbench Icarus Verilog (MesaBus UART → baca HW ID SUMP3) |
 | `fetch_third_party.py` | Mengisi `third_party/` (git submodule, atau unduh ZIP jika tanpa git) |
 | `third_party/sump3` | Submodule [blackmesalabs/sump3](https://github.com/blackmesalabs/sump3) |
@@ -558,6 +559,10 @@ dari PulseView ke hardware lewat bd_server, tanpa GUI `sump3.py`) ada di
 4. **Fase 4** (opsional): Ethernet, kedalaman RLE lebih besar, channel tambahan, 200 MHz.
 5. **Fase 5** (opsional): deep capture ke DDR3 lewat AXI HP + Ethernet, dan streaming
    kontinu terbatas ±11 MB/s (Ethernet S9 100 Mbit/s). SUMP3 sendiri tidak bisa streaming.
+
+Arah jangka panjang menjadi **produk logic analyzer consumer** (board sendiri, USB
+plug-and-play, front-end input, driver PulseView native) ada di
+[`docs/PRODUCT_PLAN.md`](docs/PRODUCT_PLAN.md).
 
 ## Lisensi
 
