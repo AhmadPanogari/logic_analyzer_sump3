@@ -559,6 +559,7 @@ board S9:
 | **115200, Log level default**, 50K @1 MHz | **Berhasil** pada Run pertama |
 | Run kedua / ganti jumlah sampel | Gagal: `serial-libsp: Read error (995)` (operasi baca yang dibatalkan, bug libserialport lama) |
 | PulseView **nightly**, 115200 | Run pertama berhasil (64K, 11,8 s). Run berikutnya selesai dalam 0,00–0,13 s **tanpa data** |
+| **PulseView ber-patch** (`pulseview-ols-*-installer.exe`, lihat di bawah) | **Run berulang berhasil tanpa Connect ulang** (diuji di board S9) |
 
 Penyebab gagal pada Run berikutnya ada di driver OLS libsigrok (semua versi), bukan di
 board. Di Windows, event RX port serial masih "menyala" sisa Run sebelumnya, sehingga
@@ -568,10 +569,11 @@ selesai" (0,1 s, 0 sampel). Patch `host/sigrok/libsigrok-ols-rx-robust.patch`
 membaca per blok, mengabaikan pembacaan kosong, dan menghitung transfer hanya jika byte
 benar-benar diterima. Di co-sim dengan fault injection (setiap pembacaan ke-3 kosong),
 driver asli menghasilkan 0 byte di setiap Run, sedangkan driver ber-patch selalu lengkap.
-Patch ini perlu build PulseView sendiri (panduan: `docs/BUILD_PULSEVIEW_WINDOWS.md`) atau
-masuk ke upstream sigrok.
+Installer PulseView Windows dengan patch ini dibuat otomatis oleh workflow
+`.github/workflows/pulseview-windows.yml` (*Actions → PulseView Windows (OLS patch) →
+Artifacts*). Panduan dan jalur build lokal ada di `docs/BUILD_PULSEVIEW_WINDOWS.md`.
 
-Saran sampai ada PulseView ber-patch: pakai **115200**, Log level default, dan **sambungkan
+Dengan PulseView resmi (tanpa patch): pakai **115200**, Log level default, dan **sambungkan
 ulang perangkat** (Connect → Scan → OK) sebelum setiap Run, atau pakai
 `la.py ols-capture --open` (membaca per blok, aman di 921600).
 
