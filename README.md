@@ -413,6 +413,7 @@ Vivado 2025.2, Windows:
 | Connect sump3.py ↔ bd_server ↔ MesaBus UART | `ck100_hub 100 MHz`, `probe_pod 4096x48`, `debug_pod 2048x64` |
 | Pola uji, trigger `or_falling` D0, Trig Pos 0 % | Capture −169 µs … +3,2 ms |
 | Save_VCD → PulseView, decoder UART D0 @115200 | `Hello SUMP3 PulseView\r\n` terbaca utuh; pulsa 10 ns D14 tiap 1 ms tertangkap |
+| Decoder SPI D1–D4, mode 0 | MOSI naik berurutan (0x17, 0x18, …), MISO = ~MOSI (0xE8, 0xE7, …) |
 
 ### Konversi manual
 
