@@ -1,0 +1,901 @@
+diff --git a/Makefile.am b/Makefile.am
+index 3b68142..8107ec2 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -520,6 +520,12 @@ src_libdrivers_la_SOURCES += \
+ 	src/hardware/korad-kaxxxxp/protocol.c \
+ 	src/hardware/korad-kaxxxxp/api.c
+ endif
++if HW_LA16
++src_libdrivers_la_SOURCES += \
++	src/hardware/la16/protocol.h \
++	src/hardware/la16/protocol.c \
++	src/hardware/la16/api.c
++endif
+ if HW_LASCAR_EL_USB
+ src_libdrivers_la_SOURCES += \
+ 	src/hardware/lascar-el-usb/protocol.h \
+diff --git a/configure.ac b/configure.ac
+index 024dd4d..8c41579 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -355,6 +355,7 @@ SR_DRIVER([Kecheng KC-330B], [kecheng-kc-330b], [libusb])
+ SR_DRIVER([KERN scale], [kern-scale], [serial_comm])
+ SR_DRIVER([Kingst LA2016], [kingst-la2016], [libusb])
+ SR_DRIVER([Korad KAxxxxP], [korad-kaxxxxp], [serial_comm])
++SR_DRIVER([la16], [la16], [serial_comm])
+ SR_DRIVER([Lascar EL-USB], [lascar-el-usb], [libusb])
+ SR_DRIVER([LeCroy LogicStudio], [lecroy-logicstudio], [libusb])
+ SR_DRIVER([LeCroy X-Stream], [lecroy-xstream])
+diff --git a/src/hardware/la16/api.c b/src/hardware/la16/api.c
+new file mode 100644
+index 0000000..9b1e995
+--- /dev/null
++++ b/src/hardware/la16/api.c
+@@ -0,0 +1,323 @@
++/*
++ * This file is part of the libsigrok project.
++ *
++ * Copyright (C) 2026 Ahmad Panogari
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++/*
++ * la16: FPGA logic analyzer with its own framed serial protocol
++ * ( status while capturing, oldest-first upload with the trigger position,
++ * level and edge triggers ). Reference implementation: Antminer S9 control
++ * board ( Zynq XC7Z010 ), 16 channels at up to 200 MS/s.
++ */
++
++#include <config.h>
++#include "protocol.h"
++
++#define SERIALCOMM "921600/8n1"
++
++static const uint32_t scanopts[] = {
++	SR_CONF_CONN,
++	SR_CONF_SERIALCOMM,
++};
++
++static const uint32_t drvopts[] = {
++	SR_CONF_LOGIC_ANALYZER,
++};
++
++static const uint32_t devopts[] = {
++	SR_CONF_CONN | SR_CONF_GET,
++	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
++	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
++	SR_CONF_TRIGGER_MATCH | SR_CONF_LIST,
++	SR_CONF_CAPTURE_RATIO | SR_CONF_GET | SR_CONF_SET,
++};
++
++static const int32_t trigger_matches[] = {
++	SR_TRIGGER_ZERO,
++	SR_TRIGGER_ONE,
++	SR_TRIGGER_RISING,
++	SR_TRIGGER_FALLING,
++	SR_TRIGGER_EDGE,
++};
++
++static const char *channel_names[LA16_NUM_CHANNELS] = {
++	"D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",
++	"D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15",
++};
++
++/* Offered when base_rate / rate is an integer. */
++static const uint64_t samplerate_candidates[] = {
++	SR_MHZ(200), SR_MHZ(100), SR_MHZ(50), SR_MHZ(40), SR_MHZ(25),
++	SR_MHZ(20), SR_MHZ(10), SR_MHZ(8), SR_MHZ(5), SR_MHZ(4), SR_MHZ(2),
++	SR_MHZ(1), SR_KHZ(500), SR_KHZ(400), SR_KHZ(250), SR_KHZ(200),
++	SR_KHZ(100), SR_KHZ(50), SR_KHZ(40), SR_KHZ(25), SR_KHZ(20),
++	SR_KHZ(10), SR_KHZ(5), SR_KHZ(2), SR_KHZ(1),
++};
++
++static gboolean rate_ok(const struct dev_context *devc, uint64_t rate)
++{
++	return rate && rate <= devc->base_rate && devc->base_rate % rate == 0 &&
++		devc->base_rate / rate <= UINT32_MAX;
++}
++
++static GSList *scan(struct sr_dev_driver *di, GSList *options)
++{
++	struct sr_config *src;
++	struct sr_dev_inst *sdi;
++	struct sr_serial_dev_inst *serial;
++	struct dev_context *devc;
++	struct la16_rx rx;
++	struct la16_frame f;
++	const char *conn, *serialcomm, *s, *end;
++	const char *strings[3];
++	GSList *l;
++	unsigned int i;
++
++	conn = serialcomm = NULL;
++	for (l = options; l; l = l->next) {
++		src = l->data;
++		switch (src->key) {
++		case SR_CONF_CONN:
++			conn = g_variant_get_string(src->data, NULL);
++			break;
++		case SR_CONF_SERIALCOMM:
++			serialcomm = g_variant_get_string(src->data, NULL);
++			break;
++		}
++	}
++	if (!conn)
++		return NULL;
++	if (!serialcomm)
++		serialcomm = SERIALCOMM;
++
++	serial = sr_serial_dev_inst_new(conn, serialcomm);
++	sr_info("Probing %s.", conn);
++	if (serial_open(serial, SERIAL_RDWR) != SR_OK)
++		return NULL;
++
++	serial_flush(serial);
++	rx.len = 0;
++	/* ABORT first: a capture left running by someone else is stopped. */
++	if (la16_send(serial, LA16_CMD_ABORT, NULL, 0) != SR_OK ||
++			la16_send(serial, LA16_CMD_IDENT, NULL, 0) != SR_OK ||
++			la16_wait_frame(serial, &rx, LA16_RSP_IDENT, &f,
++				LA16_REPLY_TIMEOUT_MS) != SR_OK ||
++			f.len < 13) {
++		sr_dbg("No la16 IDENT reply.");
++		serial_close(serial);
++		return NULL;
++	}
++
++	devc = g_malloc0(sizeof(*devc));
++	devc->proto_version = f.payload[0];
++	devc->base_rate = RL32(&f.payload[2]);
++	devc->max_samples = RL32(&f.payload[6]);
++	devc->features = RL16(&f.payload[10]);
++
++	/* vendor \0 model \0 version \0 */
++	s = (const char *)&f.payload[12];
++	end = (const char *)&f.payload[f.len];
++	for (i = 0; i < 3; i++) {
++		strings[i] = (s < end && memchr(s, 0, end - s)) ? s : "";
++		s += strlen(strings[i]) + 1;
++	}
++
++	if (devc->proto_version != 1 || f.payload[1] != LA16_NUM_CHANNELS ||
++			!devc->base_rate || devc->max_samples < LA16_MIN_SAMPLES) {
++		sr_err("Unsupported la16 device ( protocol %u, %u channels ).",
++			devc->proto_version, f.payload[1]);
++		g_free(devc);
++		serial_close(serial);
++		return NULL;
++	}
++	sr_info("Found %s %s %s: base %" PRIu64 " Hz, %" PRIu64
++		" samples, features 0x%04x.", strings[0], strings[1], strings[2],
++		devc->base_rate, devc->max_samples, devc->features);
++
++	devc->cur_samplerate = devc->base_rate;
++	for (i = 0; i < ARRAY_SIZE(samplerate_candidates); i++) {
++		if (samplerate_candidates[i] == SR_MHZ(1) &&
++				rate_ok(devc, samplerate_candidates[i]))
++			devc->cur_samplerate = SR_MHZ(1);
++	}
++	devc->limit_samples = MIN(devc->max_samples, 65536);
++	devc->capture_ratio = 10;
++
++	sdi = g_malloc0(sizeof(*sdi));
++	sdi->status = SR_ST_INACTIVE;
++	sdi->vendor = g_strdup(strings[0]);
++	sdi->model = g_strdup(strings[1]);
++	sdi->version = g_strdup(strings[2]);
++	sdi->inst_type = SR_INST_SERIAL;
++	sdi->conn = serial;
++	sdi->connection_id = g_strdup(serial->port);
++	sdi->priv = devc;
++	for (i = 0; i < LA16_NUM_CHANNELS; i++)
++		sr_channel_new(sdi, i, SR_CHANNEL_LOGIC, TRUE, channel_names[i]);
++
++	serial_close(serial);
++
++	return std_scan_complete(di, g_slist_append(NULL, sdi));
++}
++
++static int config_get(uint32_t key, GVariant **data,
++	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
++{
++	struct dev_context *devc;
++
++	(void)cg;
++
++	if (!sdi)
++		return SR_ERR_ARG;
++	devc = sdi->priv;
++
++	switch (key) {
++	case SR_CONF_CONN:
++		if (!sdi->conn || !sdi->connection_id)
++			return SR_ERR_NA;
++		*data = g_variant_new_string(sdi->connection_id);
++		break;
++	case SR_CONF_SAMPLERATE:
++		*data = g_variant_new_uint64(devc->cur_samplerate);
++		break;
++	case SR_CONF_LIMIT_SAMPLES:
++		*data = g_variant_new_uint64(devc->limit_samples);
++		break;
++	case SR_CONF_CAPTURE_RATIO:
++		*data = g_variant_new_uint64(devc->capture_ratio);
++		break;
++	default:
++		return SR_ERR_NA;
++	}
++
++	return SR_OK;
++}
++
++static int config_set(uint32_t key, GVariant *data,
++	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
++{
++	struct dev_context *devc;
++	uint64_t v;
++
++	(void)cg;
++
++	devc = sdi->priv;
++
++	switch (key) {
++	case SR_CONF_SAMPLERATE:
++		v = g_variant_get_uint64(data);
++		if (!rate_ok(devc, v))
++			return SR_ERR_SAMPLERATE;
++		devc->cur_samplerate = v;
++		break;
++	case SR_CONF_LIMIT_SAMPLES:
++		v = g_variant_get_uint64(data);
++		if (v < LA16_MIN_SAMPLES || v > devc->max_samples)
++			return SR_ERR_ARG;
++		devc->limit_samples = v;
++		break;
++	case SR_CONF_CAPTURE_RATIO:
++		v = g_variant_get_uint64(data);
++		if (v > 100)
++			return SR_ERR_ARG;
++		devc->capture_ratio = v;
++		break;
++	default:
++		return SR_ERR_NA;
++	}
++
++	return SR_OK;
++}
++
++static int config_list(uint32_t key, GVariant **data,
++	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
++{
++	struct dev_context *devc;
++	uint64_t rates[ARRAY_SIZE(samplerate_candidates)];
++	unsigned int i, n;
++
++	devc = sdi ? sdi->priv : NULL;
++
++	switch (key) {
++	case SR_CONF_SCAN_OPTIONS:
++	case SR_CONF_DEVICE_OPTIONS:
++		return STD_CONFIG_LIST(key, data, sdi, cg, scanopts, drvopts,
++			devopts);
++	case SR_CONF_SAMPLERATE:
++		if (!devc)
++			return SR_ERR_ARG;
++		/* Ascending, as frontends expect. */
++		n = 0;
++		for (i = ARRAY_SIZE(samplerate_candidates); i > 0; i--) {
++			if (rate_ok(devc, samplerate_candidates[i - 1]))
++				rates[n++] = samplerate_candidates[i - 1];
++		}
++		*data = std_gvar_samplerates(rates, n);
++		break;
++	case SR_CONF_LIMIT_SAMPLES:
++		if (!devc)
++			return SR_ERR_ARG;
++		*data = std_gvar_tuple_u64(LA16_MIN_SAMPLES, devc->max_samples);
++		break;
++	case SR_CONF_TRIGGER_MATCH:
++		*data = std_gvar_array_i32(ARRAY_AND_SIZE(trigger_matches));
++		break;
++	default:
++		return SR_ERR_NA;
++	}
++
++	return SR_OK;
++}
++
++static int dev_acquisition_start(const struct sr_dev_inst *sdi)
++{
++	int ret;
++
++	if ((ret = la16_start(sdi)) != SR_OK)
++		return ret;
++
++	std_session_send_df_header(sdi);
++
++	/* STATUS frames arrive every 50 ms while armed, so poll often. */
++	return serial_source_add(sdi->session, sdi->conn, G_IO_IN, 50,
++		la16_receive_data, (struct sr_dev_inst *)sdi);
++}
++
++static int dev_acquisition_stop(struct sr_dev_inst *sdi)
++{
++	return la16_abort(sdi);
++}
++
++static struct sr_dev_driver la16_driver_info = {
++	.name = "la16",
++	.longname = "la16 FPGA logic analyzer",
++	.api_version = 1,
++	.init = std_init,
++	.cleanup = std_cleanup,
++	.scan = scan,
++	.dev_list = std_dev_list,
++	.dev_clear = std_dev_clear,
++	.config_get = config_get,
++	.config_set = config_set,
++	.config_list = config_list,
++	.dev_open = std_serial_dev_open,
++	.dev_close = std_serial_dev_close,
++	.dev_acquisition_start = dev_acquisition_start,
++	.dev_acquisition_stop = dev_acquisition_stop,
++	.context = NULL,
++};
++SR_REGISTER_DEV_DRIVER(la16_driver_info);
+diff --git a/src/hardware/la16/protocol.c b/src/hardware/la16/protocol.c
+new file mode 100644
+index 0000000..7cd2471
+--- /dev/null
++++ b/src/hardware/la16/protocol.c
+@@ -0,0 +1,422 @@
++/*
++ * This file is part of the libsigrok project.
++ *
++ * Copyright (C) 2026 Ahmad Panogari
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <config.h>
++#include "protocol.h"
++
++static const char *state_names[] = {
++	"idle", "pre-trigger fill", "waiting for trigger",
++	"post-trigger capture", "upload", "done",
++};
++
++SR_PRIV uint8_t la16_crc8(const uint8_t *data, size_t len)
++{
++	uint8_t c = 0;
++	size_t i;
++	int b;
++
++	for (i = 0; i < len; i++) {
++		c ^= data[i];
++		for (b = 0; b < 8; b++)
++			c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x07) : (uint8_t)(c << 1);
++	}
++
++	return c;
++}
++
++SR_PRIV int la16_send(struct sr_serial_dev_inst *serial, uint8_t type,
++	const uint8_t *payload, uint16_t len)
++{
++	uint8_t buf[LA16_MAX_FRAME];
++
++	if (len > LA16_MAX_PAYLOAD)
++		return SR_ERR_ARG;
++	buf[0] = LA16_SYNC;
++	buf[1] = type;
++	WL16(&buf[2], len);
++	if (len)
++		memcpy(&buf[4], payload, len);
++	buf[4 + len] = la16_crc8(&buf[1], 3 + len);
++
++	sr_dbg("Sending frame 0x%02x, %u payload bytes.", type, len);
++	if (serial_write_blocking(serial, buf, 5 + len,
++			serial_timeout(serial, 5 + len)) != 5 + len)
++		return SR_ERR;
++
++	return serial_drain(serial);
++}
++
++/* Append whatever the port has buffered. Empty reads are not an error. */
++SR_PRIV int la16_rx_fill(struct sr_serial_dev_inst *serial, struct la16_rx *rx)
++{
++	int n;
++
++	if (rx->len >= sizeof(rx->buf))
++		return 0;
++	n = serial_read_nonblocking(serial, &rx->buf[rx->len],
++		sizeof(rx->buf) - rx->len);
++	if (n < 0) {
++		sr_warn("Serial read failed (%d), retrying.", n);
++		return 0;
++	}
++	rx->len += n;
++
++	return n;
++}
++
++static void rx_drop(struct la16_rx *rx, size_t n)
++{
++	memmove(rx->buf, &rx->buf[n], rx->len - n);
++	rx->len -= n;
++}
++
++/* Take one complete frame with a valid CRC out of rx, resyncing on 0xA5. */
++SR_PRIV gboolean la16_rx_frame(struct la16_rx *rx, struct la16_frame *f)
++{
++	size_t len;
++
++	while (rx->len >= 5) {
++		if (rx->buf[0] != LA16_SYNC) {
++			rx_drop(rx, 1);
++			continue;
++		}
++		len = RL16(&rx->buf[2]);
++		if (len > LA16_MAX_PAYLOAD) {
++			rx_drop(rx, 1);
++			continue;
++		}
++		if (rx->len < len + 5)
++			return FALSE;
++		if (la16_crc8(&rx->buf[1], 3 + len) != rx->buf[4 + len]) {
++			sr_warn("Frame CRC error, resyncing.");
++			rx_drop(rx, 1);
++			continue;
++		}
++		f->type = rx->buf[1];
++		f->len = len;
++		memcpy(f->payload, &rx->buf[4], len);
++		rx_drop(rx, len + 5);
++		return TRUE;
++	}
++
++	return FALSE;
++}
++
++static void log_status(struct dev_context *devc, const struct la16_frame *f)
++{
++	uint8_t st;
++
++	if (f->len < 9)
++		return;
++	st = f->payload[0];
++	if (st != devc->last_state)
++		sr_info("Device: %s ( %u / %u samples ).",
++			st < ARRAY_SIZE(state_names) ? state_names[st] : "?",
++			RL32(&f->payload[1]), RL32(&f->payload[5]));
++	else
++		sr_dbg("Device: %s ( %u / %u samples ).",
++			st < ARRAY_SIZE(state_names) ? state_names[st] : "?",
++			RL32(&f->payload[1]), RL32(&f->payload[5]));
++	devc->last_state = st;
++}
++
++/*
++ * Blocking wait for a frame of the given type ( setup / scan / stop ).
++ * STATUS and other frames on the way are skipped, ERROR fails.
++ */
++SR_PRIV int la16_wait_frame(struct sr_serial_dev_inst *serial,
++	struct la16_rx *rx, uint8_t type, struct la16_frame *f, int timeout_ms)
++{
++	int64_t deadline;
++
++	deadline = g_get_monotonic_time() + (int64_t)timeout_ms * 1000;
++	while (g_get_monotonic_time() < deadline) {
++		while (la16_rx_frame(rx, f)) {
++			if (f->type == type)
++				return SR_OK;
++			if (f->type == LA16_RSP_ERROR && type != LA16_RSP_ERROR) {
++				sr_err("Device error %u.", f->len ? f->payload[0] : 0);
++				return SR_ERR;
++			}
++			sr_spew("Skipping frame 0x%02x while waiting for 0x%02x.",
++				f->type, type);
++		}
++		if (la16_rx_fill(serial, rx) == 0)
++			g_usleep(1000);
++	}
++
++	return SR_ERR_TIMEOUT;
++}
++
++static int convert_trigger(const struct sr_dev_inst *sdi, uint16_t *lvl_mask,
++	uint16_t *lvl_value, uint16_t *rise, uint16_t *fall)
++{
++	struct dev_context *devc;
++	struct sr_trigger *trigger;
++	struct sr_trigger_stage *stage;
++	struct sr_trigger_match *match;
++	const GSList *m;
++	uint16_t bit;
++
++	devc = sdi->priv;
++	*lvl_mask = *lvl_value = *rise = *fall = 0;
++	if (!(trigger = sr_session_trigger_get(sdi->session)))
++		return SR_OK;
++	if (g_slist_length(trigger->stages) > 1) {
++		sr_err("This device only supports 1 trigger stage.");
++		return SR_ERR_ARG;
++	}
++	stage = trigger->stages->data;
++	for (m = stage->matches; m; m = m->next) {
++		match = m->data;
++		if (!match->channel->enabled)
++			continue;
++		bit = 1 << match->channel->index;
++		switch (match->match) {
++		case SR_TRIGGER_ZERO:
++			*lvl_mask |= bit;
++			break;
++		case SR_TRIGGER_ONE:
++			*lvl_mask |= bit;
++			*lvl_value |= bit;
++			break;
++		case SR_TRIGGER_RISING:
++			*rise |= bit;
++			break;
++		case SR_TRIGGER_FALLING:
++			*fall |= bit;
++			break;
++		case SR_TRIGGER_EDGE:
++			*rise |= bit;
++			*fall |= bit;
++			break;
++		default:
++			sr_err("Unsupported trigger match %d.", match->match);
++			return SR_ERR_ARG;
++		}
++	}
++	if ((*rise | *fall) && !(devc->features & LA16_FEATURE_EDGE)) {
++		sr_err("This device has no edge triggers.");
++		return SR_ERR_ARG;
++	}
++
++	return SR_OK;
++}
++
++/* CONFIG + ARM, both acknowledged. */
++SR_PRIV int la16_start(const struct sr_dev_inst *sdi)
++{
++	struct dev_context *devc;
++	struct sr_serial_dev_inst *serial;
++	struct la16_frame f;
++	uint8_t cfg[LA16_CONFIG_LEN];
++	uint16_t lm, lv, tr, tf;
++	uint64_t pre, div;
++	int ret;
++
++	devc = sdi->priv;
++	serial = sdi->conn;
++
++	if ((ret = convert_trigger(sdi, &lm, &lv, &tr, &tf)) != SR_OK)
++		return ret;
++	if (devc->limit_samples < LA16_MIN_SAMPLES ||
++			devc->limit_samples > devc->max_samples) {
++		sr_err("Sample count must be %u .. %" PRIu64 ".",
++			LA16_MIN_SAMPLES, devc->max_samples);
++		return SR_ERR_ARG;
++	}
++	div = devc->base_rate / devc->cur_samplerate - 1;
++	pre = 0;
++	if (lm | tr | tf) {
++		pre = devc->limit_samples * devc->capture_ratio / 100;
++		if (pre >= devc->limit_samples)
++			pre = devc->limit_samples - 1;
++	}
++
++	memset(cfg, 0, sizeof(cfg));
++	cfg[0] = 0;				/* mode: buffer */
++	cfg[1] = 2;				/* upload format: auto */
++	WL16(&cfg[2], 0xFFFF);			/* channels */
++	WL32(&cfg[4], div);
++	WL32(&cfg[8], devc->limit_samples);
++	WL32(&cfg[12], pre);
++	WL16(&cfg[16], lm);
++	WL16(&cfg[18], lv);
++	WL16(&cfg[20], tr);
++	WL16(&cfg[22], tf);
++	WL32(&cfg[24], 0);			/* no trigger timeout */
++
++	sr_info("Capture: %" PRIu64 " samples at %" PRIu64 " Hz ( divider %"
++		PRIu64 " ), %" PRIu64 " pre-trigger, level %04x/%04x rise %04x"
++		" fall %04x.", devc->limit_samples, devc->cur_samplerate, div,
++		pre, lm, lv, tr, tf);
++
++	/* Stale bytes from an earlier capture are not part of this one. */
++	serial_flush(serial);
++	devc->rx.len = 0;
++
++	if ((ret = la16_send(serial, LA16_CMD_CONFIG, cfg, sizeof(cfg))) != SR_OK)
++		return ret;
++	if ((ret = la16_wait_frame(serial, &devc->rx, LA16_RSP_ACK, &f,
++			LA16_REPLY_TIMEOUT_MS)) != SR_OK) {
++		sr_err("CONFIG not acknowledged.");
++		return ret;
++	}
++	if ((ret = la16_send(serial, LA16_CMD_ARM, NULL, 0)) != SR_OK)
++		return ret;
++	if ((ret = la16_wait_frame(serial, &devc->rx, LA16_RSP_ACK, &f,
++			LA16_REPLY_TIMEOUT_MS)) != SR_OK) {
++		sr_err("ARM not acknowledged.");
++		return ret;
++	}
++
++	devc->samples_sent = 0;
++	devc->trigger_pos = -1;
++	devc->trigger_sent = FALSE;
++	devc->last_state = 0xFF;
++	devc->last_rx_us = g_get_monotonic_time();
++
++	return SR_OK;
++}
++
++SR_PRIV void la16_finish(const struct sr_dev_inst *sdi)
++{
++	serial_source_remove(sdi->session, sdi->conn);
++	std_session_send_df_end(sdi);
++}
++
++/* PulseView Stop: ABORT, then wait ( briefly ) for the END frame. */
++SR_PRIV int la16_abort(const struct sr_dev_inst *sdi)
++{
++	struct dev_context *devc;
++	struct la16_frame f;
++
++	devc = sdi->priv;
++	if (la16_send(sdi->conn, LA16_CMD_ABORT, NULL, 0) == SR_OK) {
++		if (la16_wait_frame(sdi->conn, &devc->rx, LA16_RSP_END, &f,
++				LA16_REPLY_TIMEOUT_MS) != SR_OK)
++			sr_warn("No END after ABORT.");
++	}
++	la16_finish(sdi);
++
++	return SR_OK;
++}
++
++static void send_logic(const struct sr_dev_inst *sdi, const uint8_t *data,
++	size_t samples)
++{
++	struct sr_datafeed_packet packet;
++	struct sr_datafeed_logic logic;
++
++	if (!samples)
++		return;
++	logic.length = samples * 2;
++	logic.unitsize = 2;
++	logic.data = (void *)data;
++	packet.type = SR_DF_LOGIC;
++	packet.payload = &logic;
++	sr_session_send(sdi, &packet);
++}
++
++/* DATA: samples go to the session at once, oldest first. */
++static void handle_data(const struct sr_dev_inst *sdi, const struct la16_frame *f)
++{
++	struct dev_context *devc;
++	const uint8_t *s;
++	uint64_t first, n, k;
++
++	devc = sdi->priv;
++	if (f->len < 4)
++		return;
++	first = RL32(f->payload);
++	n = (f->len - 4) / 2;
++	s = &f->payload[4];
++	if (first != devc->samples_sent)
++		sr_warn("DATA at sample %" PRIu64 ", expected %" PRIu64 ".",
++			first, devc->samples_sent);
++
++	if (devc->trigger_pos >= 0 && !devc->trigger_sent &&
++			(uint64_t)devc->trigger_pos < first + n) {
++		k = (uint64_t)devc->trigger_pos > first ?
++			(uint64_t)devc->trigger_pos - first : 0;
++		send_logic(sdi, s, k);
++		std_session_send_df_trigger(sdi);
++		devc->trigger_sent = TRUE;
++		send_logic(sdi, s + 2 * k, n - k);
++	} else {
++		send_logic(sdi, s, n);
++	}
++	devc->samples_sent = first + n;
++}
++
++SR_PRIV int la16_receive_data(int fd, int revents, void *cb_data)
++{
++	const struct sr_dev_inst *sdi;
++	struct dev_context *devc;
++	struct la16_frame f;
++	uint8_t flags;
++
++	(void)fd;
++	(void)revents;	/* Read on every call: Windows can signal G_IO_IN without data */
++
++	sdi = cb_data;
++	devc = sdi->priv;
++
++	if (la16_rx_fill(sdi->conn, &devc->rx) > 0)
++		devc->last_rx_us = g_get_monotonic_time();
++
++	while (la16_rx_frame(&devc->rx, &f)) {
++		switch (f.type) {
++		case LA16_RSP_STATUS:
++			log_status(devc, &f);
++			break;
++		case LA16_RSP_TRIGGER:
++			if (f.len >= 4)
++				devc->trigger_pos = RL32(f.payload);
++			sr_dbg("Trigger at sample %" PRIi64 ".", devc->trigger_pos);
++			break;
++		case LA16_RSP_DATA:
++			handle_data(sdi, &f);
++			break;
++		case LA16_RSP_END:
++			flags = f.len >= 5 ? f.payload[4] : 0;
++			sr_info("Capture done: %" PRIu64 " samples%s%s.",
++				devc->samples_sent,
++				(flags & LA16_END_ABORTED) ? ", aborted" : "",
++				(flags & LA16_END_TIMEOUT) ? ", trigger timeout" : "");
++			la16_finish(sdi);
++			return TRUE;
++		case LA16_RSP_ERROR:
++			sr_err("Device error %u.", f.len ? f.payload[0] : 0);
++			la16_finish(sdi);
++			return TRUE;
++		default:
++			sr_dbg("Ignoring frame 0x%02x.", f.type);
++			break;
++		}
++	}
++
++	if (g_get_monotonic_time() - devc->last_rx_us >
++			(int64_t)LA16_IDLE_TIMEOUT_MS * 1000) {
++		sr_err("Device stopped responding.");
++		la16_finish(sdi);
++	}
++
++	return TRUE;
++}
+diff --git a/src/hardware/la16/protocol.h b/src/hardware/la16/protocol.h
+new file mode 100644
+index 0000000..c65bcbe
+--- /dev/null
++++ b/src/hardware/la16/protocol.h
+@@ -0,0 +1,109 @@
++/*
++ * This file is part of the libsigrok project.
++ *
++ * Copyright (C) 2026 Ahmad Panogari
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#ifndef LIBSIGROK_HARDWARE_LA16_PROTOCOL_H
++#define LIBSIGROK_HARDWARE_LA16_PROTOCOL_H
++
++#include <stdint.h>
++#include <glib.h>
++#include <libsigrok/libsigrok.h>
++#include "libsigrok-internal.h"
++
++#define LOG_PREFIX "la16"
++
++/*
++ * la16 protocol v1. Frames in both directions:
++ *   0xA5, type, len_lo, len_hi, payload[len], crc8
++ * crc8: polynomial 0x07, init 0, over type, len and payload.
++ */
++#define LA16_SYNC		0xA5
++#define LA16_MAX_PAYLOAD	1024
++#define LA16_MAX_FRAME		(LA16_MAX_PAYLOAD + 5)
++
++/* Host -> device */
++#define LA16_CMD_IDENT		0x01
++#define LA16_CMD_CONFIG		0x02
++#define LA16_CMD_ARM		0x03
++#define LA16_CMD_ABORT		0x04
++#define LA16_CMD_STATUS		0x05
++
++/* Device -> host */
++#define LA16_RSP_IDENT		0x81
++#define LA16_RSP_ACK		0x82
++#define LA16_RSP_STATUS		0x83
++#define LA16_RSP_DATA		0x84
++#define LA16_RSP_TRIGGER	0x85
++#define LA16_RSP_END		0x86
++#define LA16_RSP_ERROR		0x8F
++
++#define LA16_CONFIG_LEN		32
++#define LA16_END_ABORTED	(1 << 1)
++#define LA16_END_TIMEOUT	(1 << 2)
++#define LA16_FEATURE_EDGE	(1 << 0)
++
++#define LA16_NUM_CHANNELS	16
++#define LA16_MIN_SAMPLES	16
++#define LA16_REPLY_TIMEOUT_MS	500
++#define LA16_IDLE_TIMEOUT_MS	2000	/* STATUS comes every 50 ms */
++
++struct la16_rx {
++	uint8_t buf[2 * LA16_MAX_FRAME];
++	size_t len;
++};
++
++struct la16_frame {
++	uint8_t type;
++	uint16_t len;
++	uint8_t payload[LA16_MAX_PAYLOAD];
++};
++
++struct dev_context {
++	/* From IDENT */
++	uint8_t proto_version;
++	uint64_t base_rate;
++	uint64_t max_samples;
++	uint16_t features;
++
++	/* Settings */
++	uint64_t cur_samplerate;
++	uint64_t limit_samples;
++	uint64_t capture_ratio;
++
++	/* Acquisition */
++	struct la16_rx rx;
++	uint64_t samples_sent;
++	int64_t trigger_pos;		/* -1 = none ( yet ) */
++	gboolean trigger_sent;
++	uint8_t last_state;
++	int64_t last_rx_us;
++};
++
++SR_PRIV uint8_t la16_crc8(const uint8_t *data, size_t len);
++SR_PRIV int la16_send(struct sr_serial_dev_inst *serial, uint8_t type,
++	const uint8_t *payload, uint16_t len);
++SR_PRIV int la16_rx_fill(struct sr_serial_dev_inst *serial, struct la16_rx *rx);
++SR_PRIV gboolean la16_rx_frame(struct la16_rx *rx, struct la16_frame *f);
++SR_PRIV int la16_wait_frame(struct sr_serial_dev_inst *serial,
++	struct la16_rx *rx, uint8_t type, struct la16_frame *f, int timeout_ms);
++SR_PRIV int la16_start(const struct sr_dev_inst *sdi);
++SR_PRIV void la16_finish(const struct sr_dev_inst *sdi);
++SR_PRIV int la16_abort(const struct sr_dev_inst *sdi);
++SR_PRIV int la16_receive_data(int fd, int revents, void *cb_data);
++
++#endif

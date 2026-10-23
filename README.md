@@ -655,8 +655,14 @@ jumper baud sama dengan mode OLS):
 * Frame `STATUS` saat capture, data dikirim **terlama dulu** dengan posisi trigger.
 * RTL: `rtl/la16/`. Uji unit cocotb: `sim/la16` (`make`, 7/7 lolos).
 * Build Vivado 2025.2: **Setup WNS +0,566 ns** di 100 MHz (lolos timing, 2 sampel per clock).
-* **Driver libsigrok `la16` belum dibuat**, jadi varian ini belum bisa dipakai dari
-  PulseView. Untuk sekarang pakai `antminer_s9_ols`.
+* Driver libsigrok `la16`: `host/sigrok/libsigrok-la16-driver.patch`. Ikut dibangun oleh
+  workflow `.github/workflows/pulseview-windows.yml` ke installer PulseView yang sama dengan
+  patch OLS. Di PulseView pilih driver **"la16 FPGA logic analyzer"**, port COM channel B,
+  baud sesuai jumper J9 (default 921600).
+* Co-sim driver ⇄ RTL: `sim/la16/run_cosim.sh` (sigrok-cli + driver `la16` ⇄ TCP ⇄
+  cocotb ⇄ `la16_engine`). Lolos: scan, divider 200 MS/s dan 1 MS/s, trigger level
+  0x1234 di posisi 25 %, tepi naik D15 dan tepi turun D3 tepat di posisi pra-trigger,
+  64K sampel, 3 Run berturut-turut pada satu koneksi.
 
 ```powershell
 cd vivado

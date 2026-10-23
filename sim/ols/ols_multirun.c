@@ -1,6 +1,7 @@
 /* ols_multirun: several acquisitions on one open OLS device, like pressing
  * Run repeatedly in PulseView ( the port stays open between runs ).
  *   ols_multirun <conn> [runs] [samples] [loglevel]
+ *   Driver "ols", or $SR_DRIVER ( e.g. SR_DRIVER=la16 ).
  * Exit status 0 when every run returns samples*2 bytes ( 16 channels ). */
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +31,7 @@ int main(int argc, char **argv)
 	sr_log_loglevel_set(argc > 4 ? atoi(argv[4]) : 2);
 	drivers = sr_driver_list(ctx);
 	for (i = 0; drivers[i]; i++)
-		if (!g_strcmp0(drivers[i]->name, "ols")) drv = drivers[i];
+		if (!g_strcmp0(drivers[i]->name, g_getenv("SR_DRIVER") ? g_getenv("SR_DRIVER") : "ols")) drv = drivers[i];
 	sr_driver_init(ctx, drv);
 	src = g_malloc0(sizeof(*src));
 	src->key = SR_CONF_CONN; src->data = g_variant_new_string(argv[1]);

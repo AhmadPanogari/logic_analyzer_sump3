@@ -1,4 +1,6 @@
-# PulseView Windows installer with host/sigrok/libsigrok-ols-rx-robust.patch.
+# PulseView Windows installer with the patches in host/sigrok/:
+#   libsigrok-ols-rx-robust.patch  OLS driver: repeated runs on Windows
+#   libsigrok-la16-driver.patch    la16 driver ( docs/PROTOCOL_LA16.md )
 #
 # Same recipe as sigrok's nightly ( github.com/sigrokproject/sigrok-build ),
 # but MXE is built on the runner: sigrok's prebuilt image
@@ -93,17 +95,20 @@ jobs:
           path: mxe
           key: mxe-${{ env.MXE_COMMIT }}-${{ env.MXE_TARGETS }}-v1
 
-      - name: sigrok libraries ( libsigrok with the OLS patch )
+      - name: sigrok libraries ( libsigrok with the OLS patch and la16 driver )
         run: |
           cd sigrok-build/ci/mxe
-          sed -i "/^cd libsigrok\$/a git apply $GITHUB_WORKSPACE/host/sigrok/libsigrok-ols-rx-robust.patch" \
+          sed -i "/^cd libsigrok\$/a git apply $GITHUB_WORKSPACE/host/sigrok/libsigrok-ols-rx-robust.patch $GITHUB_WORKSPACE/host/sigrok/libsigrok-la16-driver.patch" \
             sigrok-mxe-build-dependencies.sh
           grep -n -A1 '^cd libsigrok$' sigrok-mxe-build-dependencies.sh
           . ./sigrok-mxe-init-toolchain.sh
           ./sigrok-mxe-build-dependencies.sh
           echo "== libsigrok changes =="
           git -C build/libsigrok log -1 --format='%h %s'
+          git -C build/libsigrok add -N src/hardware/la16
           git -C build/libsigrok diff --stat
+          grep -q 'D\["HAVE_HW_LA16"\]=" 1"' build/libsigrok/config.status
+          echo "la16 driver enabled"
 
       - name: PulseView
         run: |
