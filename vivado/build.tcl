@@ -4,6 +4,7 @@
 #   cd vivado
 #   vivado -mode batch -source build.tcl -tclargs antminer_s9
 #   vivado -mode batch -source build.tcl -tclargs antminer_s9_ols
+#   vivado -mode batch -source build.tcl -tclargs antminer_s9_la16
 #   vivado -mode batch -source build.tcl -tclargs zybo_z7_10
 #   vivado -mode batch -source build.tcl -tclargs arty_z7_10
 #
@@ -19,6 +20,8 @@
 #   antminer_s9           -> la_top_s9 ( clock = PS FCLK_CLK0, needs a PS7 block design )
 #   antminer_s9_ols       -> la_top_s9_ols ( same board, OLS/SUMP protocol for PulseView,
 #                            no SUMP3/MesaBus, uses constraints/antminer_s9.xdc )
+#   antminer_s9_la16      -> la_top_s9_la16 ( same board, own la16 protocol and
+#                            libsigrok driver, 200 MS/s, docs/PROTOCOL_LA16.md )
 #   zybo_z7_10/arty_z7_10 -> la_top    ( clock = 125 MHz PL oscillator, PL only )
 # -----------------------------------------------------------------------------
 set board  [expr { [llength $argv] > 0 ? [lindex $argv 0] : "antminer_s9" }]
@@ -27,9 +30,14 @@ set part   xc7z010clg400-1
 set script_dir [file normalize [file dirname [info script]]]
 set root       [file normalize "$script_dir/.."]
 set out_dir    "$script_dir/build_$board"
-# Variant "<board>_ols" uses the base board pins with the OLS engine
-set ols_variant [string match "*_ols" $board]
-set pin_board   [expr { $ols_variant ? [string range $board 0 end-4] : $board }]
+# Variants "<board>_ols" / "<board>_la16" use the base board pins with the
+# OLS or la16 engine instead of SUMP3
+set variant ""
+foreach v { ols la16 } {
+  if { [string match "*_$v" $board] } { set variant $v }
+}
+set ols_variant [expr { $variant ne "" }]
+set pin_board   [expr { $ols_variant ? [string range $board 0 end-[expr { [string length $variant] + 1 }]] : $board }]
 set board_xdc  "$root/constraints/$pin_board.xdc"
 
 if { ![file exists $board_xdc] } {
@@ -54,11 +62,11 @@ proc find_file { dir name } {
 
 set use_ps [expr { $pin_board eq "antminer_s9" }]
 if { $ols_variant && !$use_ps } {
-  puts "ERROR: the OLS variant currently exists for antminer_s9 only"
+  puts "ERROR: the $variant variant currently exists for antminer_s9 only"
   exit 1
 }
 if { $ols_variant } {
-  set top la_top_s9_ols
+  set top la_top_s9_$variant
 } else {
   set top [expr { $use_ps ? "la_top_s9" : "la_top" }]
 }
@@ -148,12 +156,19 @@ if { $use_ps } {
 
 # Project RTL
 read_verilog "$root/rtl/la_test_pattern.v"
-if { $ols_variant } {
+if { $variant eq "ols" } {
   # OLS / SUMP engine for PulseView ( own RTL, no third party HDL )
   read_verilog "$root/rtl/ols/ols_uart.v"
   read_verilog "$root/rtl/ols/ols_engine.v"
   read_verilog "$root/rtl/ols/la_ols_core.v"
   read_verilog "$root/rtl/ols/la_top_s9_ols.v"
+} elseif { $variant eq "la16" } {
+  # la16 engine ( own protocol and libsigrok driver, own RTL )
+  read_verilog "$root/rtl/ols/ols_uart.v"
+  read_verilog "$root/rtl/la16/la16_capture.v"
+  read_verilog "$root/rtl/la16/la16_engine.v"
+  read_verilog "$root/rtl/la16/la16_core.v"
+  read_verilog "$root/rtl/la16/la_top_s9_la16.v"
 } else {
   read_verilog "$root/rtl/la_core.v"
   read_verilog "$root/rtl/la_sump3.v"
@@ -180,7 +195,7 @@ if { $ols_variant } {
 }
 
 read_xdc $board_xdc
-# Variant specific extra pins, e.g. constraints/antminer_s9_ols.xdc
+# Variant specific extra pins, e.g. constraints/antminer_s9_ols.xdc / _la16.xdc
 if { $ols_variant && [file exists "$root/constraints/$board.xdc"] } {
   read_xdc "$root/constraints/$board.xdc"
 }

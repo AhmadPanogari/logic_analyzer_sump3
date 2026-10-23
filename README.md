@@ -644,6 +644,41 @@ UART/I2C lambat, turunkan samplerate agar durasi lebih panjang, misalnya 1 MHz =
   (diuji di board pada 115200 dan 921600). Dengan PulseView ber-patch, Run berulang
   berhasil di board pada 115200 dan 921600 tanpa Connect ulang.
 
+## Mode la16 (dalam pengembangan): protokol dan driver sendiri, 200 MS/s
+
+Rancangan: `docs/PROTOCOL_LA16.md`. Varian bitstream `antminer_s9_la16` (pin, LED, dan
+jumper baud sama dengan mode OLS):
+
+* Probe dicuplik IDDR di kedua tepi FCLK0 100 MHz = **200 MS/s** di 16 channel, buffer
+  BRAM 64K sampel.
+* Trigger level + tepi naik/turun/keduanya, pra-trigger, timeout.
+* Frame `STATUS` saat capture, data dikirim **terlama dulu** dengan posisi trigger.
+* RTL: `rtl/la16/`. Uji unit cocotb: `sim/la16` (`make`).
+* **Driver libsigrok `la16` belum dibuat**, jadi varian ini belum bisa dipakai dari
+  PulseView. Untuk sekarang pakai `antminer_s9_ols`.
+
+```powershell
+cd vivado
+vivado -mode batch -source build.tcl -tclargs antminer_s9_la16
+```
+
+## Tes DDR board S9 (persiapan buffer DDR)
+
+Board S9 memakai 2× Samsung K4B2G1646F-BYMA (DDR3L 2 Gbit x16) = bus 32 bit, **512 MB**.
+`vivado/build.tcl` mengatur PS7 untuk chip ini (setara MT41K128M16 JT-125, 533 MHz,
+training otomatis). `vivado/s9_ddr_test.tcl` menginisialisasi DDR lewat JTAG lalu
+menguji controller, bus data, bus alamat (aliasing), dan 8 blok acak di seluruh 512 MB:
+
+```powershell
+cd vivado
+vivado -mode batch -source build.tcl -tclargs antminer_s9_ols    # build ulang: ps7_init baru
+s9_ddr_test.bat
+```
+
+Argumen adalah folder build yang berisi `ps7_init.tcl` (default `build_antminer_s9_ols`).
+Hasil yang diharapkan: semua `PASS` dan `DDR OK: 512 MB, 32 bit, 533 MHz`. Setelah tes,
+muat bitstream seperti biasa dengan `s9_jtag_load`.
+
 ## Menambah / mengganti sinyal
 
 1. Sambungkan sinyal ke `pod0_events`/`pod1_events` di `rtl/la_core.v` (atau tambah pod

@@ -15,3 +15,6 @@ __pycache__/
 sim/ols/sim_build/
 sim/ols/build_cosim/
 sim/ols/results.xml
+sim/la16/sim_build/
+sim/la16/results.xml
+sim/la16/*.log
