@@ -17,7 +17,7 @@ sinyal maks. ±6 MHz praktis             harga terjangkau              dan mahal
 | Channel | 8 (16 dengan samplerate lebih rendah) | **16** | 16 |
 | Samplerate | 24 MHz | **100 MHz** (resolusi 10 ns) | 100 MHz ke atas |
 | Sinyal praktis (≥ 4 sampel/periode) | ±6 MHz | **±25 MHz** | ±25 MHz ke atas |
-| Capture panjang | Streaming USB, dibatasi 24 MHz | **Streaming RLE** di 100 MHz untuk sinyal biasa | Buffer / streaming |
+| Capture panjang | Streaming mentah USB, dibatasi 24 MHz | **Streaming RLE** di 100 MHz + **streaming mentah** ±16–20 MS/s (16 ch) | Buffer / streaming |
 | Software | PulseView | **PulseView native** (open source) | Software sendiri |
 | Ketersediaan di Indonesia | Mudah | **Produksi / stok lokal** | Jarang, impor |
 | Dukungan | Tidak ada | **Panduan & dukungan Bahasa Indonesia** | Bahasa Inggris / Mandarin |
@@ -119,8 +119,9 @@ untuk kebanyakan sinyal consumer. Sinyal yang lebih ramai jatuh ke mode buffer
 
 ## 5b. Rekomendasi untuk tahap P2 (bukti konsep murah)
 
-Tujuan P2: membuktikan **streaming RLE 16 ch @ 100 MHz lewat USB 2.0** di FPGA kandidat
-yang murah, sebelum mendesain PCB sendiri.
+Tujuan P2: membuktikan **ketiga mode capture** (lihat 5d), terutama streaming RLE
+16 ch @ 100 MHz dan streaming mentah lewat USB 2.0, di FPGA kandidat yang murah,
+sebelum mendesain PCB sendiri.
 
 | Opsi | Komponen | Kelebihan | Kekurangan |
 |---|---|---|---|
@@ -129,7 +130,8 @@ yang murah, sebelum mendesain PCB sendiri.
 
 Yang diukur di P2:
 - Throughput nyata sync FIFO (target ±35–40 MB/s).
-- Event RLE per detik yang bisa dialirkan tanpa overflow.
+- Event RLE per detik yang bisa dialirkan tanpa overflow (mode 2).
+- Samplerate maksimum streaming mentah tanpa overflow untuk 8 dan 16 channel (mode 3).
 - Pemakaian resource SUMP3 di FPGA Gowin + timing 100 MHz.
 - Kedalaman buffer mode trigger (BSRAM, atau SDRAM internal GW2AR bila dipakai).
 
@@ -166,7 +168,8 @@ Durasi untuk sinyal yang **terus aktif** (lebih lama jika ada jeda diam):
 | Streaming | tak terbatas | tak terbatas | tak terbatas |
 
 **Rekomendasi v1**: streaming RLE sebagai fitur utama + buffer ±1 juta event dari SDRAM
-internal FPGA (tanpa biaya BOM tambahan) untuk sinyal yang terlalu ramai bagi USB.
+internal FPGA (tanpa biaya BOM tambahan) untuk sinyal yang terlalu ramai bagi USB, +
+**streaming mentah** untuk sinyal ramai tapi lambat (lihat 5d).
 Kasus terburuk (berubah tiap 10 ns) memakai mode *raw* 16 bit/sampel tanpa timestamp
 (±4 juta sampel ≈ 40 ms di SDRAM 64 Mbit), karena bandwidth tulis SDRAM bisa tidak cukup
 untuk event 64 bit pada 100 juta event/detik.
@@ -176,11 +179,46 @@ Spesifikasi pemasaran yang jujur, misalnya: *"Buffer 1M transisi + streaming tan
 
 Semua kapasitas FPGA dan throughput USB di atas adalah perkiraan; ukur di P2.
 
+## 5d. Tiga mode capture (v1)
+
+Agar produk unggul dari clone FX2 di semua skenario, v1 memakai satu jalur USB
+(FT232H/FT2232H sync FIFO, ±35–40 MB/s) dan satu set probe untuk tiga mode:
+
+| Mode | Cara kerja | Samplerate | Durasi | Untuk |
+|---|---|---|---|---|
+| **1. Buffer 100 MHz** (trigger) | SUMP3 RLE (atau raw) ke SDRAM internal, lalu dikirim | 100 MHz | ±1 juta event | Sinyal cepat: SPI 10–25 MHz, glitch 10 ns, timing teliti |
+| **2. Streaming RLE** | Event RLE dialirkan langsung ke PC | 100 MHz | Tak terbatas selama ≤ ±4 juta event/s | Sinyal dengan jeda: UART, I2C, GPIO; rekam menit sampai jam |
+| **3. Streaming mentah** (seperti FX2) | Sampel mentah dialirkan langsung ke PC | Bisa dipilih; perkiraan maks. **16 ch ±16–20 MS/s**, **8 ch ±32–40 MS/s** | Tak terbatas (dibatasi RAM PC) | Sinyal ramai tapi lambat: LCD SPI ≤ ±5 MHz banyak frame, bus paralel lambat |
+
+Perbandingan per skenario (target):
+
+| Skenario | Clone FX2 | **Produk v1** | Mode |
+|---|---|---|---|
+| Init LCD SPI di SCLK 10–20 MHz | Tidak bisa | **Bisa** | 1 |
+| Timing CS/DC/RESET, glitch | ±42 ns | **10 ns** | 1 / 2 |
+| UART/I2C berjam-jam | Bisa (24 MHz) | **Bisa (100 MHz)** | 2 |
+| LCD SPI ≤ 4–6 MHz, banyak frame | Bisa | **Bisa** (8 ch hingga ±32–40 MS/s) | 3 |
+| 16 channel streaming | ±12 MS/s | **±16–20 MS/s** | 3 |
+
+Catatan desain mode 3:
+* Pengemasan sampel: 16 ch = 2 byte/sampel, 8 ch = 1 byte/sampel; pemilihan channel
+  aktif mengurangi bandwidth.
+* FIFO di FPGA + deteksi **overflow** (jika PC/USB tertinggal) yang dilaporkan ke
+  PulseView, bukan data rusak diam-diam.
+* Samplerate dibuat dari clock 100 MHz dengan divider (100/N MHz), sehingga resolusi
+  tetap sinkron dengan mode 1 dan 2.
+* Trigger dapat dihitung di hardware (seperti mode 1) atau di PC (seperti fx2lafw).
+* Driver libsigrok menangani ketiga mode sebagai satu perangkat; pengguna memilih
+  samplerate dan mode di PulseView.
+
+Semua angka throughput adalah perkiraan dari kemampuan FT232H/FT2232H dan perlu diukur
+di P2.
+
 ## 6. Software
 
 | Komponen | Isi |
 |---|---|
-| Driver libsigrok `sump3` (C, GPL) | Scan USB, konfigurasi, trigger, streaming RLE → paket logic sigrok. Diusulkan upstream ke sigrok |
+| Driver libsigrok `sump3` (C, GPL) | Scan USB, konfigurasi, trigger, tiga mode capture (buffer 100 MHz, streaming RLE, streaming mentah) → paket logic sigrok. Diusulkan upstream ke sigrok |
 | PulseView | Dipakai apa adanya (resmi) setelah driver upstream; sebelum itu build khusus |
 | Firmware FPGA | SUMP3 + streaming + kontrol USB |
 | Installer / driver Windows | Hindari langkah manual (mis. Zadig). Pilih jalur driver USB yang jalan out-of-the-box |
@@ -221,5 +259,8 @@ menghubungi BlackMesaLabs.
 - [ ] Target harga jual dan target BOM (menentukan pilihan FPGA dan front-end)
 - [ ] Rentang tegangan input dan tingkat proteksi
 - [ ] Memory depth: usulan streaming RLE + buffer ±1 juta event (SDRAM internal FPGA), lihat 5c
+- [x] Mode capture v1: **buffer 100 MHz + streaming RLE + streaming mentah** (lihat 5d)
+- [ ] Analisis LCD SPI cepat (≥ 40 MHz) / frame penuh di SCLK tinggi: perlu samplerate
+      lebih tinggi atau buffer lebih besar; tentukan apakah masuk target v1
 - [ ] Pilihan FPGA dan USB bridge (setelah P2)
 - [ ] Model distribusi: open hardware penuh, atau hardware terbuka + produk jadi berbayar
