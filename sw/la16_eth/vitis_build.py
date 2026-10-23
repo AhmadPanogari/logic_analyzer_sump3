@@ -114,10 +114,18 @@ client = vitis.create_client()
 client.set_workspace(path=ws)
 
 domain_name = "standalone_ps7_cortexa9_0"
+# no_boot_bsp: no FSBL ( the board boots over JTAG, s9_jtag_load.tcl does the
+# PS init ). Building the FSBL is slow and can hang the platform build.
 try:
-    platform = client.create_platform_component(
-        name="s9_platform", hw_design=xsa, os="standalone",
-        cpu="ps7_cortexa9_0", domain_name=domain_name)
+    try:
+        platform = client.create_platform_component(
+            name="s9_platform", hw_design=xsa, os="standalone",
+            cpu="ps7_cortexa9_0", domain_name=domain_name, no_boot_bsp=True)
+    except TypeError:
+        print("NOTE: this Vitis has no no_boot_bsp option, the FSBL is built too")
+        platform = client.create_platform_component(
+            name="s9_platform", hw_design=xsa, os="standalone",
+            cpu="ps7_cortexa9_0", domain_name=domain_name)
 except Exception as e:
     print("ERROR: platform creation failed: %s" % e)
     dump_logs(ws)
