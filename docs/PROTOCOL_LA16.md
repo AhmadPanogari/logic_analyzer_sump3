@@ -145,5 +145,6 @@ Detail dan angka ada di `docs/PRODUCT_PLAN.md` (3c, 5c, 5d).
 | 4 ✅ | Workflow CI membangun PulseView dengan patch OLS + driver `la16` | Installer dari Actions |
 | 5 ✅ | Uji di board S9 | Run berulang, trigger tepi, Stop saat menunggu, gelombang bertahap |
 | 6 | RLE di BRAM + `DATA_RLE` | Co-sim + board |
-| 7 ⏳ | Buffer DDR3 S9 lewat AXI HP0: varian `antminer_s9_la16ddr` (251M sampel). Lolos simulasi dan co-sim driver; uji board berikutnya. Lalu Ethernet (upload cepat) dan mode streaming | Board |
+| 7 ✅ | Buffer DDR3 S9 lewat AXI HP0: varian `antminer_s9_la16ddr` (251M sampel). Lolos simulasi, co-sim driver, dan uji board (1M @200 MS/s, 4M @1 MS/s) | Board |
+| 7b | Ethernet: ARM membaca DDR, protokol la16 lewat TCP (upload cepat), lalu mode streaming | Board |
 | 8 | (Produk P2, Tang Primer 20K + FT232H) mode streaming mentah dan RLE, transport USB sync FIFO | — |

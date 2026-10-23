@@ -654,7 +654,7 @@ jumper baud sama dengan mode OLS):
 * Trigger level + tepi naik/turun/keduanya, pra-trigger, timeout.
 * Frame `STATUS` saat capture, data dikirim **terlama dulu** dengan posisi trigger.
 * RTL: `rtl/la16/`. Uji unit cocotb: `sim/la16` (`make`, 7/7 lolos).
-* Build Vivado 2025.2: **Setup WNS +0,566 ns** di 100 MHz (lolos timing, 2 sampel per clock).
+* Build Vivado 2025.2: **Setup WNS +1,460 ns** di 100 MHz (sebelum pipeline front-end +0,566 ns).
 * Driver libsigrok `la16`: `host/sigrok/libsigrok-la16-driver.patch`. Ikut dibangun oleh
   workflow `.github/workflows/pulseview-windows.yml` ke installer PulseView yang sama dengan
   patch OLS. Di PulseView pilih driver **"la16 FPGA logic analyzer"**, port COM channel B,
@@ -691,6 +691,11 @@ s9_jtag_load.bat build_antminer_s9_la16ddr     # menjalankan juga s9_ddr_init ( 
 Batas praktis saat ini adalah **upload lewat UART** (921600 ≈ 45 ribu sampel/s): 1M sampel
 ±22 s, 10M sampel ±4 menit. Tahap berikutnya: Ethernet. Kalau FIFO DDR pernah penuh,
 END membawa flag *overflow* dan log PulseView menampilkannya.
+
+**Diuji di board S9 (23-10-2026):** WNS +0,259 ns, peta HP0 → DDR 0x0 (512 MB),
+`s9_jtag_load` menginisialisasi DDR. Di PulseView: batas sampel ±251M, 64K @1 MHz benar,
+**1M sampel @200 MS/s** (upload ±22 s, pulsa 10 ns = 2 sampel, trigger tepat), **4M sampel
+@1 MHz** dengan decoder UART benar, Run berulang dan Stop saat menunggu trigger berhasil.
 
 Verifikasi: `sim/la16` `make USE_DDR=1` (8/8, model AXI3 dengan jeda acak 30–70 %) dan
 `USE_DDR=1 ./run_cosim.sh` (driver asli, 200.000 sampel, trigger tepi naik tepat di posisi).
