@@ -222,6 +222,9 @@ if os.path.exists(user_cfg):
     with open(user_cfg) as f:
         text = f.read()
     text, n = re.subn(r'"echo\.c"', '"la16_server.c"\n"s9_phy.c"', text)
+    # The template builds with -O0, too slow for the upload loop
+    text = re.sub(r"set\(USER_COMPILE_OPTIMIZATION_LEVEL\s+-O\w*\)",
+                  "set(USER_COMPILE_OPTIMIZATION_LEVEL -O2)", text)
     with open(user_cfg, "w") as f:
         f.write(text)
     print("UserConfig.cmake: echo.c -> la16_server.c + s9_phy.c ( %d place%s )"

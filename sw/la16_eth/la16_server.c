@@ -113,16 +113,29 @@ static u32 ms_since(XTime t)
 	return (u32)((now - t) / (COUNTS_PER_SECOND / 1000));
 }
 
-static u8 crc8(u8 c, const u8 *d, u32 n)
+/* CRC-8 ( poly 0x07 ) by table: the bitwise loop limited the upload to ~3 MB/s */
+static u8 crc8_table[256];
+
+static void crc8_init(void)
 {
 	u32 i;
 	int b;
+	u8 c;
 
-	for (i = 0; i < n; i++) {
-		c ^= d[i];
+	for (i = 0; i < 256; i++) {
+		c = (u8)i;
 		for (b = 0; b < 8; b++)
 			c = (c & 0x80) ? (u8)((c << 1) ^ 0x07) : (u8)(c << 1);
+		crc8_table[i] = c;
 	}
+}
+
+static u8 crc8(u8 c, const u8 *d, u32 n)
+{
+	u32 i;
+
+	for (i = 0; i < n; i++)
+		c = crc8_table[c ^ d[i]];
 	return c;
 }
 
@@ -475,6 +488,7 @@ int start_application(void)
 {
 	struct tcp_pcb *pcb;
 
+	crc8_init();
 	if (reg_rd(R_ID) != REG_ID_VALUE) {
 		xil_printf("la16: registers not found at 0x%08x ( wrong bitstream? )\r\n",
 			   REG_BASE);

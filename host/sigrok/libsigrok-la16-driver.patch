@@ -29,7 +29,7 @@ index 024dd4d..8c41579 100644
  SR_DRIVER([LeCroy X-Stream], [lecroy-xstream])
 diff --git a/src/hardware/la16/api.c b/src/hardware/la16/api.c
 new file mode 100644
-index 0000000..9b1e995
+index 0000000..db94688
 --- /dev/null
 +++ b/src/hardware/la16/api.c
 @@ -0,0 +1,323 @@
@@ -327,8 +327,8 @@ index 0000000..9b1e995
 +
 +	std_session_send_df_header(sdi);
 +
-+	/* STATUS frames arrive every 50 ms while armed, so poll often. */
-+	return serial_source_add(sdi->session, sdi->conn, G_IO_IN, 50,
++	/* Short period: on Windows this timeout is what drives the upload. */
++	return serial_source_add(sdi->session, sdi->conn, G_IO_IN, LA16_POLL_MS,
 +		la16_receive_data, (struct sr_dev_inst *)sdi);
 +}
 +
@@ -358,10 +358,10 @@ index 0000000..9b1e995
 +SR_REGISTER_DEV_DRIVER(la16_driver_info);
 diff --git a/src/hardware/la16/protocol.c b/src/hardware/la16/protocol.c
 new file mode 100644
-index 0000000..15ce7bf
+index 0000000..cc62ef2
 --- /dev/null
 +++ b/src/hardware/la16/protocol.c
-@@ -0,0 +1,426 @@
+@@ -0,0 +1,442 @@
 +/*
 + * This file is part of the libsigrok project.
 + *
@@ -733,12 +733,51 @@ index 0000000..15ce7bf
 +	devc->samples_sent = first + n;
 +}
 +
++/* Handle one frame of a running capture. TRUE when the capture is over. */
++static gboolean handle_frame(const struct sr_dev_inst *sdi,
++	struct dev_context *devc, struct la16_frame *f)
++{
++	uint8_t flags;
++
++	switch (f->type) {
++	case LA16_RSP_STATUS:
++		log_status(devc, f);
++		break;
++	case LA16_RSP_TRIGGER:
++		if (f->len >= 4)
++			devc->trigger_pos = RL32(f->payload);
++		sr_dbg("Trigger at sample %" PRIi64 ".", devc->trigger_pos);
++		break;
++	case LA16_RSP_DATA:
++		handle_data(sdi, f);
++		break;
++	case LA16_RSP_END:
++		flags = f->len >= 5 ? f->payload[4] : 0;
++		sr_info("Capture done: %" PRIu64 " samples%s%s.",
++			devc->samples_sent,
++			(flags & LA16_END_ABORTED) ? ", aborted" : "",
++			(flags & LA16_END_TIMEOUT) ? ", trigger timeout" : "");
++		la16_finish(sdi);
++		return TRUE;
++	case LA16_RSP_ERROR:
++		sr_err("Device error %u.", f->len ? f->payload[0] : 0);
++		la16_finish(sdi);
++		return TRUE;
++	default:
++		sr_dbg("Ignoring frame 0x%02x.", f->type);
++		break;
++	}
++
++	return FALSE;
++}
++
 +SR_PRIV int la16_receive_data(int fd, int revents, void *cb_data)
 +{
 +	const struct sr_dev_inst *sdi;
 +	struct dev_context *devc;
 +	struct la16_frame f;
-+	uint8_t flags;
++	int64_t deadline_us;
++	int got;
 +
 +	(void)fd;
 +	(void)revents;	/* Read on every call: Windows can signal G_IO_IN without data */
@@ -746,39 +785,16 @@ index 0000000..15ce7bf
 +	sdi = cb_data;
 +	devc = sdi->priv;
 +
-+	if (la16_rx_fill(sdi->conn, &devc->rx) > 0)
-+		devc->last_rx_us = g_get_monotonic_time();
-+
-+	while (la16_rx_frame(&devc->rx, &f)) {
-+		switch (f.type) {
-+		case LA16_RSP_STATUS:
-+			log_status(devc, &f);
-+			break;
-+		case LA16_RSP_TRIGGER:
-+			if (f.len >= 4)
-+				devc->trigger_pos = RL32(f.payload);
-+			sr_dbg("Trigger at sample %" PRIi64 ".", devc->trigger_pos);
-+			break;
-+		case LA16_RSP_DATA:
-+			handle_data(sdi, &f);
-+			break;
-+		case LA16_RSP_END:
-+			flags = f.len >= 5 ? f.payload[4] : 0;
-+			sr_info("Capture done: %" PRIu64 " samples%s%s.",
-+				devc->samples_sent,
-+				(flags & LA16_END_ABORTED) ? ", aborted" : "",
-+				(flags & LA16_END_TIMEOUT) ? ", trigger timeout" : "");
-+			la16_finish(sdi);
-+			return TRUE;
-+		case LA16_RSP_ERROR:
-+			sr_err("Device error %u.", f.len ? f.payload[0] : 0);
-+			la16_finish(sdi);
-+			return TRUE;
-+		default:
-+			sr_dbg("Ignoring frame 0x%02x.", f.type);
-+			break;
-+		}
-+	}
++	/* Drain what the connection has: one read per call caps the upload. */
++	deadline_us = g_get_monotonic_time() + LA16_DRAIN_MS * 1000;
++	do {
++		got = la16_rx_fill(sdi->conn, &devc->rx);
++		if (got > 0)
++			devc->last_rx_us = g_get_monotonic_time();
++		while (la16_rx_frame(&devc->rx, &f))
++			if (handle_frame(sdi, devc, &f))
++				return TRUE;
++	} while (got > 0 && g_get_monotonic_time() < deadline_us);
 +
 +	if (g_get_monotonic_time() - devc->last_rx_us >
 +			(int64_t)LA16_IDLE_TIMEOUT_MS * 1000) {
@@ -790,10 +806,10 @@ index 0000000..15ce7bf
 +}
 diff --git a/src/hardware/la16/protocol.h b/src/hardware/la16/protocol.h
 new file mode 100644
-index 0000000..c65bcbe
+index 0000000..7d3a049
 --- /dev/null
 +++ b/src/hardware/la16/protocol.h
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,116 @@
 +/*
 + * This file is part of the libsigrok project.
 + *
@@ -857,9 +873,16 @@ index 0000000..c65bcbe
 +#define LA16_MIN_SAMPLES	16
 +#define LA16_REPLY_TIMEOUT_MS	500
 +#define LA16_IDLE_TIMEOUT_MS	2000	/* STATUS comes every 50 ms */
++/*
++ * Receive callback period. On Windows glib cannot wait on a socket, so the
++ * callback only runs on this timeout: each call drains the connection
++ * ( for at most LA16_DRAIN_MS, to keep the UI responsive ).
++ */
++#define LA16_POLL_MS		5
++#define LA16_DRAIN_MS		20
 +
 +struct la16_rx {
-+	uint8_t buf[2 * LA16_MAX_FRAME];
++	uint8_t buf[16 * LA16_MAX_FRAME];
 +	size_t len;
 +};
 +
