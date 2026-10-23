@@ -1,7 +1,29 @@
 # Rencana Produk: Logic Analyzer Consumer
 
-Status: **draf awal**. Angka target dan pesaing di bawah adalah asumsi awal yang perlu
-divalidasi (harga komponen, spesifikasi pesaing, ukuran pasar).
+Status: **draf**. Keputusan yang sudah diambil: **16 channel, 100 MHz, pasar awal
+Indonesia**. Angka komponen dan pesaing masih perlu divalidasi (harga, ketersediaan).
+
+## 0. Posisi produk (pasar Indonesia)
+
+```
+Clone FX2 (murah, mudah didapat)        PRODUK INI                    Kingst / DSLogic / Saleae
+8 ch, 24 MHz (16 ch lebih rendah)  ◄──  16 ch, 100 MHz, RLE  ──►     16 ch 100+ MHz, tapi jarang
+sinyal maks. ±6 MHz praktis             harga terjangkau              dan mahal di Indonesia
+                                        dukungan lokal (Bahasa)
+```
+
+| Hal | Clone FX2 | **Produk ini (target)** | Kingst / sejenis |
+|---|---|---|---|
+| Channel | 8 (16 dengan samplerate lebih rendah) | **16** | 16 |
+| Samplerate | 24 MHz | **100 MHz** (resolusi 10 ns) | 100 MHz ke atas |
+| Sinyal praktis (≥ 4 sampel/periode) | ±6 MHz | **±25 MHz** | ±25 MHz ke atas |
+| Capture panjang | Streaming USB, dibatasi 24 MHz | **Streaming RLE** di 100 MHz untuk sinyal biasa | Buffer / streaming |
+| Software | PulseView | **PulseView native** (open source) | Software sendiri |
+| Ketersediaan di Indonesia | Mudah | **Produksi / stok lokal** | Jarang, impor |
+| Dukungan | Tidak ada | **Panduan & dukungan Bahasa Indonesia** | Bahasa Inggris / Mandarin |
+
+Pesan utama: *"16 channel 100 MHz yang terjangkau, mudah didapat, langsung jalan di
+PulseView, dengan panduan Bahasa Indonesia."*
 
 ## 1. Untuk siapa
 
@@ -35,12 +57,13 @@ ke PulseView, dan decoder protokol.
 
 | Kelas | Contoh | Ciri |
 |---|---|---|
-| Clone murah 8 ch 24 MHz | berbasis Cypress FX2 (driver `fx2lafw`) | Sangat murah, streaming USB, didukung PulseView |
-| 16 ch 100–400 MHz | Kingst LA1010/LA2016, DSLogic (DreamSourceLab) | Harga menengah, software sendiri (DSView adalah fork PulseView) |
+| Clone murah 8 ch 24 MHz | berbasis Cypress FX2 (driver `fx2lafw`) | Sangat murah, mudah didapat di Indonesia, streaming USB, didukung PulseView. Terbatas 24 MHz |
+| 16 ch 100–400 MHz | Kingst LA1010/LA2016, DSLogic (DreamSourceLab) | Software sendiri (DSView adalah fork PulseView). **Di Indonesia jarang dan mahal** |
 | Premium | Saleae Logic | Mahal, software sangat matang |
 
-Kesimpulan: bersaing **hanya** di "16 ch 100 MHz" sulit karena pasarnya sudah ramai dan
-murah. Produk perlu **pembeda yang jelas**.
+Kesimpulan: secara global kelas "16 ch 100 MHz" sudah ramai, tetapi **di Indonesia ada
+celah**: pilihan yang mudah didapat hanya clone FX2 24 MHz, sedangkan kelas 100 MHz jarang
+dan mahal. Pembeda tambahan di bawah memperkuat posisi itu.
 
 ## 4. Kandidat pembeda
 
@@ -54,6 +77,19 @@ murah. Produk perlu **pembeda yang jelas**.
    terbuka, bisa diperbaiki dan dimodifikasi komunitas.
 4. **Input front-end yang benar-benar tahan banting** (proteksi, ambang yang bisa
    diatur), karena di kelas murah ini sering jadi titik lemah.
+
+## 4b. Pertimbangan pasar Indonesia
+
+| Hal | Rencana / yang perlu dicek |
+|---|---|
+| Penjualan | Marketplace (Tokopedia, Shopee) dan komunitas (grup maker, kampus, SMK) |
+| Harga | Sangat sensitif harga: BOM dan pilihan FPGA harus ditekan sejak desain |
+| Dukungan | Panduan, video, dan contoh proyek dalam Bahasa Indonesia; garansi lokal |
+| Ketahanan | Pengguna pemula sering salah colok 5 V / 12 V → proteksi input wajib |
+| Komponen | Sebagian besar impor (FPGA, USB bridge): perhitungkan bea masuk, kurs, lead time |
+| Produksi | PCB/PCBA: bandingkan pabrikan luar (mis. JLCPCB/PCBWay) vs perakitan lokal |
+| Regulasi | Cek kebutuhan sertifikasi alat elektronik/USB di Indonesia (Kominfo/SDPPI umumnya untuk perangkat telekomunikasi/radio; alat ukur USB tanpa radio perlu dikonfirmasi) |
+| Edukasi | Paket untuk kampus/SMK (harga lab, modul praktikum PulseView) |
 
 ## 5. Arsitektur yang diusulkan (v1)
 
@@ -80,6 +116,25 @@ Perkiraan anggaran streaming RLE lewat USB 2.0 sync FIFO (±35 MB/s), dengan asu
 ±8 byte per event: **±4 juta perubahan sinyal per detik** untuk semua channel. Itu cukup
 untuk kebanyakan sinyal consumer. Sinyal yang lebih ramai jatuh ke mode buffer
 (trigger → buffer → tampil).
+
+## 5b. Rekomendasi untuk tahap P2 (bukti konsep murah)
+
+Tujuan P2: membuktikan **streaming RLE 16 ch @ 100 MHz lewat USB 2.0** di FPGA kandidat
+yang murah, sebelum mendesain PCB sendiri.
+
+| Opsi | Komponen | Kelebihan | Kekurangan |
+|---|---|---|---|
+| **A (disarankan)** | Dev board **Gowin** (mis. Tang Nano 20K, GW2AR-18) + modul **FT232H/FT2232H** mode *245 sync FIFO* | FPGA murah, dicatu USB, mudah didapat di marketplace Indonesia, mendekati BOM produk. Toolchain Gowin EDA atau open source (Yosys + nextpnr) | Perlu porting SUMP3 ke Gowin (inferensi BSRAM, cek konstruksi Verilog) |
+| B (eksperimen cepat) | Board **S9** yang sudah ada + modul FT232H/FT2232H kedua di konektor J1–J4 (8 data + 5 kontrol + CLKOUT 60 MHz) | Tidak perlu FPGA baru; SUMP3 sudah jalan | Bukan platform produk; kabel jumper di 60 MHz rawan; CJMCU yang sekarang dipakai untuk JTAG (channel A) tidak bisa sekaligus jadi sync FIFO |
+
+Yang diukur di P2:
+- Throughput nyata sync FIFO (target ±35–40 MB/s).
+- Event RLE per detik yang bisa dialirkan tanpa overflow.
+- Pemakaian resource SUMP3 di FPGA Gowin + timing 100 MHz.
+- Kedalaman buffer mode trigger (BSRAM, atau SDRAM internal GW2AR bila dipakai).
+
+Spesifikasi teknis kandidat (ketersediaan, harga, kapasitas BSRAM/SDRAM) harus dicek dari
+datasheet dan penjual sebelum membeli.
 
 ## 6. Software
 
@@ -120,10 +175,11 @@ menghubungi BlackMesaLabs.
 
 ## 9. Keputusan yang masih terbuka
 
-- [ ] Target harga jual dan target BOM
-- [ ] Jumlah channel (8 / 16) dan samplerate target (100 MHz cukup? 200+ MHz?)
+- [x] Jumlah channel: **16**
+- [x] Samplerate: **100 MHz** (resolusi 10 ns, sinyal praktis ±25 MHz)
+- [x] Pasar awal: **Indonesia**
+- [ ] Target harga jual dan target BOM (menentukan pilihan FPGA dan front-end)
 - [ ] Rentang tegangan input dan tingkat proteksi
 - [ ] Streaming RLE saja, atau + memori eksternal untuk burst
 - [ ] Pilihan FPGA dan USB bridge (setelah P2)
 - [ ] Model distribusi: open hardware penuh, atau hardware terbuka + produk jadi berbayar
-- [ ] Pasar awal: lokal (Indonesia) atau global
