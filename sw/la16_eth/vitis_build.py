@@ -145,9 +145,30 @@ def set_lwip(dom):
 
 
 set_lwip(domain)
-platform.build()
+status = platform.build()
+print("platform.build():", status)
 
-xpfm = os.path.join(ws, "s9_platform", "export", "s9_platform", "s9_platform.xpfm")
+# Ask Vitis where it exported the platform ( it only accepts a .xpfm it
+# knows in its platform repositories )
+xpfm = None
+try:
+    xpfm = client.find_platform_in_repos("s9_platform")
+except Exception as e:
+    print("NOTE: find_platform_in_repos: %s" % e)
+if not xpfm:
+    found = [os.path.join(r, f) for r, _, fs in os.walk(ws) for f in fs if f.endswith(".xpfm")]
+    print("xpfm files in the workspace:", found or "none")
+    if not found:
+        print("ERROR: the platform build did not export a .xpfm, see the output above")
+        dump_logs(ws)
+        vitis.dispose()
+        sys.exit(1)
+    xpfm = found[0]
+    try:
+        client.add_platform_repos(platform=[os.path.dirname(os.path.dirname(xpfm))])
+    except Exception as e:
+        print("NOTE: add_platform_repos: %s" % e)
+print("Platform :", xpfm)
 app = client.create_app_component(name="la16_eth", platform=xpfm,
                                   domain=domain_name, template="lwip_echo_server")
 
