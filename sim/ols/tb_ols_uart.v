@@ -11,12 +11,13 @@
 `default_nettype none
 
 module tb_ols_uart;
-  localparam real BIT_NS = 1.0e9 / 921600.0;
 
   reg          bd_rx = 1;
   wire         bd_tx;
   wire [3:0]   led_n;
   reg  [15:0]  probe = 16'h0000;
+  reg  [1:0]   baud_sel_n = 2'b11;
+  real         bit_ns = 1.0e9 / 921600.0;
   reg  [7:0]   rx_buf [0:255];
   integer      rx_cnt = 0;
   integer      errors = 0;
@@ -26,6 +27,7 @@ module tb_ols_uart;
   (
     .probe    ( probe     ),
     .tp_sel_n ( 1'b0      ),    // Jumper closed: test pattern
+    .baud_sel_n ( baud_sel_n ), // 2'b11 = no jumper = 921600
     .bd_rx    ( bd_rx     ),
     .bd_tx    ( bd_tx     ),
     .led_n    ( led_n     )
@@ -34,11 +36,11 @@ module tb_ols_uart;
   task send_byte ( input [7:0] b );
     integer k;
     begin
-      bd_rx = 0; #( BIT_NS );
+      bd_rx = 0; #( bit_ns );
       for ( k = 0; k < 8; k = k + 1 ) begin
-        bd_rx = b[k]; #( BIT_NS );
+        bd_rx = b[k]; #( bit_ns );
       end
-      bd_rx = 1; #( BIT_NS );
+      bd_rx = 1; #( bit_ns );
     end
   endtask
 
@@ -54,9 +56,9 @@ module tb_ols_uart;
     integer k;
     reg [7:0] b;
     @( negedge bd_tx );
-    #( BIT_NS * 1.5 );
+    #( bit_ns * 1.5 );
     for ( k = 0; k < 8; k = k + 1 ) begin
-      b[k] = bd_tx; #( BIT_NS );
+      b[k] = bd_tx; #( bit_ns );
     end
     rx_buf[ rx_cnt % 256 ] = b;
     rx_cnt = rx_cnt + 1;
@@ -66,7 +68,7 @@ module tb_ols_uart;
     #2000;
     for ( i = 0; i < 5; i = i + 1 ) send_byte( 8'h00 );
     send_byte( 8'h02 );
-    #( BIT_NS * 60 );
+    #( bit_ns * 60 );
     $display( "ID : %s%s%s%s", rx_buf[0], rx_buf[1], rx_buf[2], rx_buf[3] );
     if ( { rx_buf[0], rx_buf[1], rx_buf[2], rx_buf[3] } != "1ALS" ) begin
       $display( "ERROR: bad ID" ); errors = errors + 1;
@@ -74,7 +76,7 @@ module tb_ols_uart;
 
     rx_cnt = 0;
     send_byte( 8'h04 );
-    #( BIT_NS * 10 * 50 );
+    #( bit_ns * 10 * 50 );
     $display( "metadata bytes : %0d", rx_cnt );
     if ( rx_cnt != 42 || rx_buf[0] != 8'h01 || rx_buf[1] != "A" ) begin
       $display( "ERROR: bad metadata" ); errors = errors + 1;
@@ -89,12 +91,25 @@ module tb_ols_uart;
     send_long( 8'h81, { 16'd3, 16'd3 } );// Read 16, delay 16
     send_long( 8'h82, 32'h0000_0030 );   // Groups 3,4 disabled -> 2 bytes/sample
     send_byte( 8'h01 );                  // Arm
-    #( BIT_NS * 10 * 40 );
+    #( bit_ns * 10 * 40 );
     $display( "sample bytes : %0d ( expect 32 )", rx_cnt );
     if ( rx_cnt != 32 ) begin
       $display( "ERROR: bad sample count" ); errors = errors + 1;
     end
     $display( "LEDs ( active low ) : %b", led_n );
+
+    // Jumpers on J9 pin 11 + 12 -> 115200 baud, ID must still answer
+    baud_sel_n = 2'b00;
+    bit_ns     = 1.0e9 / 115200.0;
+    #( 2000 );
+    rx_cnt = 0;
+    for ( i = 0; i < 5; i = i + 1 ) send_byte( 8'h00 );
+    send_byte( 8'h02 );
+    #( bit_ns * 60 );
+    $display( "ID @115200 : %s%s%s%s", rx_buf[0], rx_buf[1], rx_buf[2], rx_buf[3] );
+    if ( { rx_buf[0], rx_buf[1], rx_buf[2], rx_buf[3] } != "1ALS" ) begin
+      $display( "ERROR: bad ID at 115200" ); errors = errors + 1;
+    end
 
     if ( errors == 0 ) $display( "PASS" );
     else               $display( "FAIL ( %0d errors )", errors );
@@ -102,7 +117,7 @@ module tb_ols_uart;
   end
 
   initial begin
-    #( 10_000_000 );
+    #( 40_000_000 );
     $display( "FAIL : timeout" );
     $finish;
   end

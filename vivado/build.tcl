@@ -159,6 +159,10 @@ if { $ols_variant } {
 }
 
 read_xdc $board_xdc
+# Variant specific extra pins, e.g. constraints/antminer_s9_ols.xdc
+if { $ols_variant && [file exists "$root/constraints/$board.xdc"] } {
+  read_xdc "$root/constraints/$board.xdc"
+}
 
 synth_design -top $top -part $part
 report_utilization    -file "$out_dir/post_synth_util.rpt"

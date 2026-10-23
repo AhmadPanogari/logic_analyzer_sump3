@@ -9,8 +9,13 @@
 --     clk_100m    : 100 MHz. The OLS host assumes a 100 MHz reference clock.
 --     probe[15:0] : asynchronous probe inputs
 --     tp_sel      : 1 = internal test pattern on all 16 channels
+--     baud_sel    : UART baud rate ( 1 = jumper closed )
+--                     00 = 921600   01 = 460800   10 = 230400   11 = 115200
+--                   The libsigrok 0.5.2 OLS driver ( PulseView 0.4.2 ) reads
+--                   one byte per poll and loses bytes on long captures at
+--                   921600 on Windows; 230400 or 115200 keeps up.
 --                   ( PulseView "Pattern mode = Internal" does the same )
---     uart_rx/tx  : to the USB-UART
+--     uart_rx/tx  : to the USB-UART, 8N1
 --     led[3:0]    : active high. 0 heartbeat, 1 armed ( waiting for
 --                   trigger ), 2 test pattern, 3 UART RX activity
 -- Language:    Verilog-2001
@@ -20,13 +25,13 @@
 
 module la_ols_core
 #(
-  parameter CLKS_PER_BIT = 108,          // 100 MHz / 921600 baud
   parameter DEPTH_BITS   = 16            // 64K samples
 )
 (
   input  wire         clk_100m,
   input  wire [15:0]  probe,
   input  wire         tp_sel,
+  input  wire [1:0]   baud_sel,
   input  wire         uart_rx,
   output wire         uart_tx,
   output reg  [3:0]   led
@@ -38,6 +43,9 @@ module la_ols_core
   (* IOB = "TRUE", ASYNC_REG = "TRUE" *) reg  [15:0]   probe_meta;
   (* ASYNC_REG = "TRUE" *)               reg  [15:0]   probe_sync;
   (* ASYNC_REG = "TRUE" *)               reg  [1:0]    tp_sel_sr;
+  (* ASYNC_REG = "TRUE" *)               reg  [1:0]    baud_meta;
+  (* ASYNC_REG = "TRUE" *)               reg  [1:0]    baud_sync;
+  reg  [15:0]   clks_per_bit = 16'd108;   // 921600 until the jumpers are read
   (* ASYNC_REG = "TRUE" *)               reg  [1:0]    rx_sr;
 
   wire [15:0]   test_pattern;
@@ -63,6 +71,14 @@ always @ ( posedge clk_100m ) begin : proc_reset_sync
   probe_meta <= probe[15:0];
   probe_sync <= probe_meta[15:0];
   tp_sel_sr  <= { tp_sel_sr[0], tp_sel };
+  baud_meta  <= baud_sel;
+  baud_sync  <= baud_meta;
+  case ( baud_sync )
+    2'b00   : clks_per_bit <= 16'd108;   // 921600 ( +0.5 % )
+    2'b01   : clks_per_bit <= 16'd217;   // 460800 ( +0.0 % )
+    2'b10   : clks_per_bit <= 16'd434;   // 230400 ( +0.0 % )
+    default : clks_per_bit <= 16'd868;   // 115200 ( +0.0 % )
+  endcase
   rx_sr      <= { rx_sr[0], uart_rx };
 end // proc_reset_sync
   assign reset_loc = reset_sr[3];
@@ -85,19 +101,21 @@ la_test_pattern u_la_test_pattern
 //-----------------------------------------------------------------------------
 // UART + OLS engine
 //-----------------------------------------------------------------------------
-ols_uart_rx #( .CLKS_PER_BIT ( CLKS_PER_BIT ) ) u_ols_uart_rx
+ols_uart_rx u_ols_uart_rx
 (
   .clk          ( clk_100m        ),
   .reset        ( reset_loc       ),
+  .clks_per_bit ( clks_per_bit    ),
   .rx           ( rx_sr[1]        ),
   .rx_byte      ( rx_byte         ),
   .rx_valid     ( rx_valid        )
 );
 
-ols_uart_tx #( .CLKS_PER_BIT ( CLKS_PER_BIT ) ) u_ols_uart_tx
+ols_uart_tx u_ols_uart_tx
 (
   .clk          ( clk_100m        ),
   .reset        ( reset_loc       ),
+  .clks_per_bit ( clks_per_bit    ),
   .tx_byte      ( tx_byte         ),
   .tx_valid     ( tx_valid        ),
   .tx_ready     ( tx_ready        ),

@@ -1,8 +1,9 @@
 /* ****************************************************************************
 -- Source file: ols_uart.v
 -- Description: Small 8N1 UART receiver and transmitter for the OLS engine.
---              CLKS_PER_BIT = clk frequency / baud rate
---              ( 100 MHz / 921600 = 108, error 0.5 % ).
+--              clks_per_bit = clk frequency / baud rate, a run time input
+--              ( 100 MHz: 921600 = 108, 460800 = 217, 230400 = 434,
+--                115200 = 868 ). Keep it stable while a byte is in flight.
 --              The RX input must already be synchronized to clk.
 -- Language:    Verilog-2001
 -- ***************************************************************************/
@@ -10,12 +11,10 @@
 `default_nettype none
 
 module ols_uart_rx
-#(
-  parameter CLKS_PER_BIT = 108
-)
 (
   input  wire        clk,
   input  wire        reset,
+  input  wire [15:0] clks_per_bit,
   input  wire        rx,
   output reg  [7:0]  rx_byte,
   output reg         rx_valid
@@ -33,12 +32,12 @@ module ols_uart_rx
     if ( busy == 0 ) begin
       if ( rx == 0 ) begin
         busy    <= 1;
-        clk_cnt <= CLKS_PER_BIT / 2;   // Sample in the middle of each bit
+        clk_cnt <= { 1'b0, clks_per_bit[15:1] };// Sample mid-bit
         bit_cnt <= 4'd0;
       end
     end else begin
       if ( clk_cnt == 0 ) begin
-        clk_cnt <= CLKS_PER_BIT - 1;
+        clk_cnt <= clks_per_bit - 1;
         bit_cnt <= bit_cnt + 1;
         if ( bit_cnt == 4'd0 ) begin
           if ( rx == 1 ) begin
@@ -67,12 +66,10 @@ endmodule // ols_uart_rx
 
 
 module ols_uart_tx
-#(
-  parameter CLKS_PER_BIT = 108
-)
 (
   input  wire        clk,
   input  wire        reset,
+  input  wire [15:0] clks_per_bit,
   input  wire [7:0]  tx_byte,
   input  wire        tx_valid,   // Byte accepted when tx_valid & tx_ready
   output wire        tx_ready,
@@ -95,12 +92,12 @@ module ols_uart_tx
         busy    <= 1;
         shift   <= { 1'b1, tx_byte, 1'b0 };// Stop, data, start
         bit_cnt <= 4'd0;
-        clk_cnt <= CLKS_PER_BIT - 1;
+        clk_cnt <= clks_per_bit - 1;
         tx      <= 0;
       end
     end else begin
       if ( clk_cnt == 0 ) begin
-        clk_cnt <= CLKS_PER_BIT - 1;
+        clk_cnt <= clks_per_bit - 1;
         bit_cnt <= bit_cnt + 1;
         shift   <= { 1'b1, shift[9:1] };
         tx      <= shift[1];

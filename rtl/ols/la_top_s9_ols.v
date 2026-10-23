@@ -7,6 +7,9 @@
 --              constraints/antminer_s9.xdc ):
 --                J1 pin 11/12 = UART TX/RX, J5..J8 = D0..D15,
 --                J9 pin 5 = test pattern jumper, LEDs D5..D8 active low.
+--              UART baud ( jumper to GND, pull-ups inside ):
+--                none = 921600, J9 pin 11 = 460800, J9 pin 12 = 230400,
+--                both = 115200. Set the same baud rate in PulseView.
 --              LEDs: D5 heartbeat, D6 armed ( waiting for trigger ),
 --                    D7 test pattern, D8 UART RX activity.
 -- Language:    Verilog-2001
@@ -42,6 +45,7 @@ module la_top_s9_ols
   // PL pins
   input  wire [15:0]  probe,
   input  wire         tp_sel_n,
+  input  wire [1:0]   baud_sel_n,     // J9 pin 11 / pin 12, jumper to GND
   input  wire         bd_rx,
   output wire         bd_tx,
   output wire [3:0]   led_n
@@ -92,6 +96,7 @@ la_ols_core u_la_ols_core
   .clk_100m     ( fclk0                ),
   .probe        ( probe[15:0]          ),
   .tp_sel       ( ~tp_sel_n            ),
+  .baud_sel     ( ~baud_sel_n          ),
   .uart_rx      ( bd_rx                ),
   .uart_tx      ( bd_tx                ),
   .led          ( led[3:0]             )

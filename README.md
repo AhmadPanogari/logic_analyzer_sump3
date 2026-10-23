@@ -523,7 +523,7 @@ tidak memakai HDL SUMP3, MesaBus, atau proyek lain. Pin dan clock sama dengan va
 | Penyimpanan | **64K sampel mentah** (64K × 16 bit, 32 BRAM36) | 4096 event RLE |
 | Durasi | 655 µs @100 MHz, 65 ms @1 MHz, 6,5 s @10 kHz | 3 ms – 10 s, tergantung aktivitas |
 | Trigger | 4 stage mask/value, **level** 0/1 | OR/AND rising/falling |
-| UART | 921600 baud, 8N1 (channel B CJMCU) | 921600 autobaud (MesaBus) |
+| UART | 921600 / 460800 / 230400 / 115200 (jumper J9), 8N1 | 921600 autobaud (MesaBus) |
 | Download 64K sampel | ±1,4 s | beberapa detik |
 
 ### Build dan muat
@@ -538,6 +538,21 @@ D:\Xilinx\2025.2\Vivado\bin\xsdb.bat vivado\s9_jtag_load.tcl vivado\build_antmin
 Wiring sama dengan mode SUMP3: JTAG di J10, USB-UART (channel B CJMCU) di J1 pin 11/12,
 probe di J5–J8, jumper pola uji di J9 pin 5. LED: D5 heartbeat, **D6 menyala = menunggu
 trigger**, D7 pola uji, D8 aktivitas UART.
+
+**Baud UART dipilih dengan jumper di J9** (dibaca terus-menerus, tidak perlu build ulang):
+
+| J9 pin 11 → pin 9 (GND) | J9 pin 12 → pin 10 (GND) | Baud | Download 64K sampel |
+|---|---|---|---|
+| terbuka | terbuka | **921600** (default) | ±1,4 s |
+| jumper | terbuka | 460800 | ±2,8 s |
+| terbuka | jumper | **230400** | ±5,7 s |
+| jumper | jumper | **115200** | ±11 s |
+
+Baud di PulseView / `ols-capture` harus sama dengan jumper. **PulseView 0.4.2 (libsigrok
+0.5.2) di Windows hanya stabil sampai ±5K sampel pada 921600**: driver OLS-nya membaca
+1 byte per poll sehingga kehilangan byte pada transfer panjang, lalu capture berhenti
+tanpa menampilkan data. Untuk PulseView 0.4.2, pakai **230400 atau 115200**.
+`ols-capture` (membaca per blok) aman di 921600.
 
 Cek komunikasi tanpa PulseView:
 
@@ -562,7 +577,8 @@ berubah), sehingga terlihat apakah masalahnya di board atau di PulseView.
 
 1. **Connect to a Device** (ikon perangkat di toolbar):
    * Driver: **Openbench Logic Sniffer & SUMP compatibles**
-   * Interface: **Serial Port**, pilih port COM channel B CJMCU, baud rate **921600**
+   * Interface: **Serial Port**, pilih port COM channel B CJMCU, baud rate **sama dengan
+     jumper J9** (disarankan 230400 atau 115200 untuk PulseView 0.4.2, lihat tabel di atas)
    * **Scan for devices** → muncul *AntMiner S9 LA … with 16 channels* → OK
 2. Atur **jumlah sampel** (maks. 65536) dan **samplerate** (maks. 100 MHz) di toolbar.
 3. **Trigger** (opsional): klik nama channel, lalu pilih kondisi **0** atau **1**. OLS hanya
@@ -596,7 +612,10 @@ UART/I2C lambat, turunkan samplerate agar durasi lebih panjang, misalnya 1 MHz =
 
   Transport TCP libsigrok (`tcp-raw`) perlu patch kecil khusus pengujian
   (`sim/ols/libsigrok-tcpraw-testharness.patch`). Driver OLS tidak diubah.
-* Belum diuji: build Vivado varian ini dan PulseView di board S9 sungguhan.
+* Di board S9: `ols-capture` 64K sampel @921600 berhasil dan file `.sr`-nya terbuka di
+  PulseView. PulseView 0.4.2 Run langsung berhasil untuk 5K sampel @921600, gagal mulai
+  10K (byte hilang di driver). Pemilih baud lewat jumper ditambahkan untuk mengatasinya
+  (diuji di simulasi pada 921600 dan 115200; belum diuji di board).
 
 ## Menambah / mengganti sinyal
 
