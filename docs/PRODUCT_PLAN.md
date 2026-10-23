@@ -65,6 +65,38 @@ Kesimpulan: secara global kelas "16 ch 100 MHz" sudah ramai, tetapi **di Indones
 celah**: pilihan yang mudah didapat hanya clone FX2 24 MHz, sedangkan kelas 100 MHz jarang
 dan mahal. Pembeda tambahan di bawah memperkuat posisi itu.
 
+## 3b. Proyek open source sejenis (dikaji Oktober 2026)
+
+| Aspek | **Milik kita** (SUMP3 + S9) | [logIP](https://github.com/meiniKi/logIP) (TU Graz) | [Enxor](https://github.com/lekgolo167/enxor-logic-analyzer) |
+|---|---|---|---|
+| Bahasa / ukuran | Verilog (SUMP3 + MesaBus) | SystemVerilog, ±1.850 baris | Verilog portabel, ±200 LUT / 223 FF |
+| Channel | 16 eksternal + 32 internal (skalabel lewat hub/pod) | Sampai 32 | 8–32 (kelipatan 8) |
+| Samplerate | 100 MHz tetap | Clock sistem + divider | 100 MHz + divider 16-bit |
+| Penyimpanan | **RLE**, timestamp 30 bit | Sampel mentah (RLE hanya direncanakan) | Event + timestamp 8 bit (diam = 1 baris tiap 255 sampel) |
+| Kedalaman | 4096 event | `2^MEM_DEPTH` sampel | 4096–8192 baris |
+| Durasi sinyal diam @100 MHz | Sampai ±10 s | = jumlah sampel (4096 → 41 µs) | ±21 ms (8192 baris) |
+| Trigger | OR/AND, rising/falling, multi-sinyal, Nth, delay, posisi 10–90 % | 4 stage mask/value (gaya SUMP) | 1 channel, rising/falling, delay, rasio pre-trigger |
+| Protokol ke PC | MesaBus UART 921600 + bd_server | **SUMP/OLS lewat UART** | Protokol sendiri, UART 115200 |
+| Software | sump3.py + PulseView (via VCD) | **PulseView langsung** (driver OLS) | GUI Python sendiri, tanpa decoder |
+| Verifikasi | Smoke test + teruji di hardware S9 | Testbench per modul + **formal verification** | Testbench per modul |
+| Lisensi | CERN OHL v1.2 + GPL | GPLv3 | GPLv3 |
+| Commit terakhir | 2026 | 2022 | 2022 |
+
+Pelajaran:
+
+1. **OLS langsung di FPGA (logIP)**: perangkat yang menjawab protokol SUMP/OLS langsung
+   dikenali driver OLS PulseView lewat port COM biasa (USB-serial FTDI), tanpa bridge
+   Python dan tanpa com0com. Lihat alternatif Fase 2 di 5f.
+2. **Pasar yang sama (Enxor)**: Enxor menyasar celah yang sama ("di antara analyzer
+   ±15 dolar dan profesional ±400 dolar"), tetapi dengan timestamp 8 bit, trigger 1
+   channel, dan GUI tanpa decoder. Ini mengonfirmasi kebutuhan pasar, dan pembeda kita
+   (RLE panjang, trigger multi-sinyal, PulseView + decoder) bernilai.
+3. **Sample-rate divider**: kedua proyek punya; pengguna consumer terbiasa memilih
+   samplerate. Ditambahkan ke mode buffer (lihat 5d).
+4. **Verifikasi**: tiru pendekatan logIP (testbench per modul + formal) untuk RTL produk.
+5. **Lisensi**: keduanya GPLv3. Mempelajari aman; **menyalin kode** membawa kewajiban
+   GPLv3 dan kecocokannya dengan CERN OHL v1.2 belum jelas. Tulis implementasi sendiri.
+
 ## 4. Kandidat pembeda
 
 1. **Capture sangat panjang di resolusi penuh lewat RLE**: hardware hanya mengirim
@@ -207,6 +239,8 @@ Catatan desain mode 3:
   PulseView, bukan data rusak diam-diam.
 * Samplerate dibuat dari clock 100 MHz dengan divider (100/N MHz), sehingga resolusi
   tetap sinkron dengan mode 1 dan 2.
+* **Sample-rate divider juga untuk mode 1 (buffer)**, seperti logIP dan Enxor: pengguna
+  bisa memilih samplerate, dan RLE pada samplerate lebih rendah memperpanjang durasi.
 * Trigger dapat dihitung di hardware (seperti mode 1) atau di PC (seperti fx2lafw).
 * Driver libsigrok menangani ketiga mode sebagai satu perangkat; pengguna memilih
   samplerate dan mode di PulseView.
@@ -245,6 +279,31 @@ driver libsigrok**. Logika RLE sendiri relatif sederhana.
   untuk membuktikan streaming RLE lewat USB; blok streaming mentah dibuat di sampingnya.
 - **Sebelum P3: putuskan A atau B**, terutama berdasarkan model lisensi/bisnis (open
   hardware penuh → A cocok; ingin bebas memilih lisensi → B).
+
+## 5f. Alternatif Fase 2: protokol OLS langsung di FPGA
+
+Terinspirasi logIP. Daripada bridge Python + COM virtual (`docs/ROADMAP_PULSEVIEW.md`
+Fase 2), FPGA menjawab protokol SUMP/OLS sendiri lewat USB-serial (FTDI VCP):
+
+```
+PulseView ─driver OLS─► COM port (FTDI) ─UART─► FPGA: decoder perintah OLS ─► SUMP3 / engine capture
+```
+
+| | Bridge Python (Fase 2 roadmap) | **OLS di FPGA** |
+|---|---|---|
+| Instalasi pengguna | Python + bridge + com0com | Hanya PulseView + driver FTDI |
+| Plug-and-play Windows | Tidak | **Ya** |
+| Penerjemahan RLE → OLS | Di PC | Di FPGA (driver OLS libsigrok mendukung mode RLE) |
+| Batasan | Batasan OLS: ≤ 32 ch, tanpa streaming, tanpa nama channel | Sama |
+
+Cocok sebagai **langkah cepat** agar PulseView bisa Run/trigger langsung (sebelum driver
+libsigrok native). Untuk tiga mode capture dan streaming (5d), driver native tetap
+diperlukan.
+
+Yang perlu diverifikasi: pemetaan event RLE SUMP3 ke format RLE OLS, batas jumlah
+sampel/count OLS, dan kecepatan UART FTDI (sampai ±12 Mbaud di FT2232H) untuk download.
+Protokol diimplementasikan sendiri dari spesifikasi SUMP/OLS publik, bukan menyalin kode
+logIP (GPLv3).
 
 ## 6. Software
 
@@ -294,6 +353,8 @@ menghubungi BlackMesaLabs.
 - [x] Mode capture v1: **buffer 100 MHz + streaming RLE + streaming mentah** (lihat 5d)
 - [x] Arsitektur sampai P2: **modifikasi SUMP3** (sadap encoder RLE) + blok streaming mentah (lihat 5e)
 - [ ] Sebelum P3: tetap turunan SUMP3 (CERN OHL) atau engine capture sendiri (lihat 5e)
+- [ ] Langkah cepat PulseView: protokol OLS langsung di FPGA (5f) vs bridge Python (roadmap Fase 2)
+- [x] Sample-rate divider untuk mode buffer (5d), mengikuti logIP/Enxor
 - [ ] Analisis LCD SPI cepat (≥ 40 MHz) / frame penuh di SCLK tinggi: perlu samplerate
       lebih tinggi atau buffer lebih besar; tentukan apakah masuk target v1
 - [ ] Pilihan FPGA dan USB bridge (setelah P2)
