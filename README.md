@@ -558,10 +558,21 @@ board S9:
 | 921600 / 230400, > 5K sampel | Gagal: driver OLS membaca 1 byte per poll dan kehilangan byte (diperparah Log level 5) |
 | **115200, Log level default**, 50K @1 MHz | **Berhasil** pada Run pertama |
 | Run kedua / ganti jumlah sampel | Gagal: `serial-libsp: Read error (995)` (operasi baca yang dibatalkan, bug libserialport lama) |
+| PulseView **nightly**, 115200 | Run pertama berhasil (64K, 11,8 s). Run berikutnya selesai dalam 0,00–0,13 s **tanpa data** |
 
-Saran: pakai **115200**, Log level default, dan **sambungkan ulang perangkat** (Connect →
-Scan → OK) sebelum setiap Run. Atau pakai **PulseView nightly** (libserialport baru), atau
-`ols-capture` (membaca per blok, aman di 921600).
+Penyebab gagal pada Run berikutnya ada di driver OLS libsigrok (semua versi), bukan di
+board. Di Windows, event RX port serial masih "menyala" sisa Run sebelumnya, sehingga
+driver mendapat `G_IO_IN` tanpa data. Driver lalu `return FALSE` (berhenti seketika, 0,00 s),
+atau menghitungnya sebagai transfer sehingga timeout 100 ms berikutnya dianggap "data
+selesai" (0,1 s, 0 sampel). Patch `host/sigrok/libsigrok-ols-rx-robust.patch`
+membaca per blok, mengabaikan pembacaan kosong, dan menghitung transfer hanya jika byte
+benar-benar diterima. Di co-sim dengan fault injection (setiap pembacaan ke-3 kosong),
+driver asli menghasilkan 0 byte di setiap Run, sedangkan driver ber-patch selalu lengkap.
+Patch ini perlu build PulseView sendiri (atau masuk ke upstream sigrok).
+
+Saran sampai ada PulseView ber-patch: pakai **115200**, Log level default, dan **sambungkan
+ulang perangkat** (Connect → Scan → OK) sebelum setiap Run, atau pakai
+`la.py ols-capture --open` (membaca per blok, aman di 921600).
 
 Cek komunikasi tanpa PulseView:
 
@@ -618,9 +629,11 @@ UART/I2C lambat, turunkan samplerate agar durasi lebih panjang, misalnya 1 MHz =
   | Trigger nilai 0x1234, capture ratio 25 % | Tepat di sampel 1024 |
   | Pattern Internal @1 MHz → decoder UART | `Hello SUMP3 PulseView` berulang |
   | Pattern Internal @100 MHz → decoder SPI | Byte berurutan, 0 error |
+  | 3× Run pada satu koneksi terbuka (`sim/ols/ols_multirun.c`, seperti PulseView) | Setiap Run lengkap |
 
   Transport TCP libsigrok (`tcp-raw`) perlu patch kecil khusus pengujian
-  (`sim/ols/libsigrok-tcpraw-testharness.patch`). Driver OLS tidak diubah.
+  (`sim/ols/libsigrok-tcpraw-testharness.patch`). Semua uji lulus dengan driver OLS asli
+  maupun dengan `host/sigrok/libsigrok-ols-rx-robust.patch`.
 * Di board S9: `ols-capture` 64K sampel @921600 berhasil dan file `.sr`-nya terbuka di
   PulseView. PulseView 0.4.2 Run langsung berhasil untuk 5K sampel @921600, gagal mulai
   10K (byte hilang di driver). Pemilih baud lewat jumper ditambahkan untuk mengatasinya

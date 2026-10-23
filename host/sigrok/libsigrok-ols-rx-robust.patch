@@ -1,0 +1,72 @@
+diff --git a/src/hardware/openbench-logic-sniffer/protocol.c b/src/hardware/openbench-logic-sniffer/protocol.c
+index e97a7c9..952db45 100644
+--- a/src/hardware/openbench-logic-sniffer/protocol.c
++++ b/src/hardware/openbench-logic-sniffer/protocol.c
+@@ -364,7 +364,8 @@ SR_PRIV int ols_receive_data(int fd, int revents, void *cb_data)
+ 	uint32_t sample;
+ 	int num_changroups, offset, j;
+ 	unsigned int i;
+-	unsigned char byte;
++	unsigned char byte, buf[4096];
++	int nread, k;
+ 
+ 	(void)fd;
+ 
+@@ -377,6 +378,23 @@ SR_PRIV int ols_receive_data(int fd, int revents, void *cb_data)
+ 		return TRUE;
+ 	}
+ 
++	/*
++	 * Read everything the port has buffered. On Windows the RX event
++	 * handle can still be signalled from a previous acquisition, so
++	 * G_IO_IN may come with no data: that is not a transfer and not
++	 * the end of the capture.
++	 */
++	nread = 0;
++	if (revents == G_IO_IN && devc->num_samples < devc->limit_samples) {
++		nread = serial_read_nonblocking(serial, buf, sizeof(buf));
++		if (nread < 0) {
++			sr_warn("Serial read failed (%d), retrying.", nread);
++			nread = 0;
++		}
++		if (nread == 0 && devc->num_transfers == 0)
++			return TRUE;
++	}
++
+ 	if (devc->num_transfers++ == 0) {
+ 		devc->raw_sample_buf = g_try_malloc(devc->limit_samples * 4);
+ 		if (!devc->raw_sample_buf) {
+@@ -395,13 +413,13 @@ SR_PRIV int ols_receive_data(int fd, int revents, void *cb_data)
+ 	}
+ 
+ 	if (revents == G_IO_IN && devc->num_samples < devc->limit_samples) {
+-		if (serial_read_nonblocking(serial, &byte, 1) != 1)
+-			return FALSE;
++	    for (k = 0; k < nread; k++) {
++		byte = buf[k];
+ 		devc->cnt_bytes++;
+ 
+ 		/* Ignore it if we've read enough. */
+ 		if (devc->num_samples >= devc->limit_samples)
+-			return TRUE;
++			break;
+ 
+ 		devc->sample[devc->num_bytes++] = byte;
+ 		sr_spew("Received byte 0x%.2x.", byte);
+@@ -433,7 +451,7 @@ SR_PRIV int ols_receive_data(int fd, int revents, void *cb_data)
+ 					sr_dbg("RLE count: %u.",
+ 					       devc->rle_count);
+ 					devc->num_bytes = 0;
+-					return TRUE;
++					continue;
+ 				}
+ 			}
+ 			devc->num_samples += devc->rle_count + 1;
+@@ -491,6 +509,7 @@ SR_PRIV int ols_receive_data(int fd, int revents, void *cb_data)
+ 			devc->num_bytes = 0;
+ 			devc->rle_count = 0;
+ 		}
++	    }
+ 	} else {
+ 		/*
+ 		 * This is the main loop telling us a timeout was reached, or

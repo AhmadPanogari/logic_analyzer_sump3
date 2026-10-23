@@ -80,6 +80,14 @@ print("spi bytes=%d sequence_errors=%d"%(len(v),len(bad)))
 sys.exit(1 if len(v) < 20 or bad else 0)
 P
 
+echo "=== 8. three runs on one open connection ( PulseView pressing Run again )"
+PCDIR=$(dirname "$CLI")/../lib/pkgconfig
+if gcc -o $OUT/ols_multirun ols_multirun.c $(PKG_CONFIG_PATH=$PCDIR pkg-config --cflags --libs libsigrok) 2>$OUT/multirun_cc.log; then
+  $OUT/ols_multirun tcp-raw/127.0.0.1/$PORT 3 2048 || { echo "FAIL multirun"; fail=1; }
+else
+  echo "SKIP multirun ( build failed, see $OUT/multirun_cc.log )"
+fi
+
 touch $OLS_STOP_FILE
 wait $SIM
 [ $fail -eq 0 ] && echo "COSIM PASS" || echo "COSIM FAIL"
