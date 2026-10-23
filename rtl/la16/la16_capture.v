@@ -46,6 +46,8 @@ module la16_capture
   output wire          done,
   output wire          ready,
   output wire          overflow,
+  output wire [W-1:0]  start_idx,                // Ring index of result sample 0
+  output wire [W:0]    ring_size,                // Ring size in samples
 
   input  wire          rd_en,
   input  wire [W-1:0]  rd_idx,
@@ -149,6 +151,9 @@ module la16_capture
     .sv0      ( sv0      ),
     .sv1      ( sv1      )
   );
+
+  assign start_idx = start;
+  assign ring_size = ring;
 
   // Ring index of result sample rd_idx
   reg  [W-1:0]  rj;

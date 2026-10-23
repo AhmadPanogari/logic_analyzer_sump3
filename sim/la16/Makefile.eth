@@ -1,0 +1,12 @@
+# cocotb + Icarus test of la16_eth_core ( registers + DDR ring, Ethernet build )
+#   make -f Makefile.eth
+SIM ?= icarus
+TOPLEVEL_LANG = verilog
+RTL = ../../rtl
+SIM_BUILD = sim_build_eth
+VERILOG_SOURCES = $(PWD)/tb_la16_eth.v $(PWD)/axi3_mem_model.v $(RTL)/la_test_pattern.v \
+  $(addprefix $(RTL)/la16/, la16_eth_core.v la16_regs.v la16_capture.v la16_front.v \
+    la16_seq.v la16_store_bram.v la16_store_ddr.v)
+COCOTB_TOPLEVEL = tb_la16_eth
+COCOTB_TEST_MODULES = test_la16_eth
+include $(shell cocotb-config --makefiles)/Makefile.sim

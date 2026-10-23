@@ -358,10 +358,10 @@ index 0000000..9b1e995
 +SR_REGISTER_DEV_DRIVER(la16_driver_info);
 diff --git a/src/hardware/la16/protocol.c b/src/hardware/la16/protocol.c
 new file mode 100644
-index 0000000..7cd2471
+index 0000000..15ce7bf
 --- /dev/null
 +++ b/src/hardware/la16/protocol.c
-@@ -0,0 +1,422 @@
+@@ -0,0 +1,426 @@
 +/*
 + * This file is part of the libsigrok project.
 + *
@@ -408,6 +408,7 @@ index 0000000..7cd2471
 +	const uint8_t *payload, uint16_t len)
 +{
 +	uint8_t buf[LA16_MAX_FRAME];
++	int ret;
 +
 +	if (len > LA16_MAX_PAYLOAD)
 +		return SR_ERR_ARG;
@@ -423,7 +424,10 @@ index 0000000..7cd2471
 +			serial_timeout(serial, 5 + len)) != 5 + len)
 +		return SR_ERR;
 +
-+	return serial_drain(serial);
++	/* TCP ( tcp-raw, la16 over Ethernet ) has no drain: the socket has it. */
++	ret = serial_drain(serial);
++
++	return (ret == SR_ERR_NA) ? SR_OK : ret;
 +}
 +
 +/* Append whatever the port has buffered. Empty reads are not an error. */
