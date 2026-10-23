@@ -547,6 +547,17 @@ python host\la.py ols-probe --port COM5
 
 Hasilnya harus `ID: b'1ALS'` dan nama `AntMiner S9 LA`.
 
+Capture tanpa PulseView (urutan perintah sama dengan driver OLS libsigrok), berguna
+untuk diagnosa. Hasilnya `.sr` yang bisa dibuka di PulseView (*File → Open*):
+
+```powershell
+python host\la.py ols-capture --port COM5 --pattern --rate 1M --open
+python host\la.py ols-capture --port COM5 --rate 100M --samples 65536 --trigger 0=0 --ratio 10
+```
+
+Alat ini mencetak setiap tahap (ID, setting, arm, byte pertama, jumlah byte, channel yang
+berubah), sehingga terlihat apakah masalahnya di board atau di PulseView.
+
 ### Di PulseView
 
 1. **Connect to a Device** (ikon perangkat di toolbar):

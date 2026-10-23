@@ -6,6 +6,7 @@ la.py : One launcher for the XC7Z010 SUMP3 logic analyzer host software.
   python host/la.py gui                         # 2) start sump3.py ( arm / trigger / download )
   python host/la.py view capture.vcd            #    convert any SUMP3 VCD and open PulseView
   python host/la.py ols-probe --port COM5       # check the OLS bitstream ( antminer_s9_ols )
+  python host/la.py ols-capture --port COM5 --pattern   # capture without PulseView
 
 Data flow:
   FPGA --UART/MesaBus--> bd_server.py --TCP 21567--> sump3.py --save_vcd-->
@@ -212,6 +213,133 @@ def cmd_ols_probe(args):
   return 0
 
 
+def _ols_open(port, baud, timeout=1.0):
+  import serial
+  if "://" in port:
+    return serial.serial_for_url(port, timeout=timeout)   # e.g. socket://host:port
+  return serial.Serial(port, baud, timeout=timeout)
+
+
+def _parse_rate(txt):
+  m = re.match(r"^\s*([0-9.]+)\s*([kKmM]?)", txt)
+  if not m:
+    sys.exit("ERROR: bad rate '%s' ( e.g. 100M, 1M, 200k )" % txt)
+  return int(float(m.group(1)) * {"": 1, "k": 1e3, "m": 1e6}[m.group(2).lower()])
+
+
+def cmd_ols_capture(args):
+  """
+  One OLS capture without PulseView, with the same command sequence as the
+  libsigrok OLS driver. Prints diagnostics, writes a sigrok .sr file that
+  PulseView can open ( File > Open ).
+  """
+  try:
+    import serial  # noqa: F401
+  except ImportError:
+    sys.exit("ERROR: pyserial missing. Run: pip install pyserial")
+  import struct
+  import time
+  import zipfile
+  sys.path.insert(0, HOST_DIR)
+  from sump3_vcd2sr import rate_string, launch_pulseview
+
+  rate = _parse_rate(args.rate)
+  if rate <= 0 or rate > 100000000:
+    sys.exit("ERROR: rate must be 10 Hz .. 100 MHz")
+  divider = int(round(100e6 / rate)) - 1
+  rate = int(100e6 // (divider + 1))
+  samples = max(4, min(args.samples, 65536))
+  readcount = (samples + 3) // 4
+
+  def lcmd(op, val):
+    return bytes([op]) + struct.pack("<I", val & 0xFFFFFFFF)
+
+  mask = value = 0
+  if args.trigger:
+    for item in args.trigger.split(","):
+      ch, lvl = item.split("=")
+      mask |= 1 << int(ch)
+      if lvl.strip() == "1":
+        value |= 1 << int(ch)
+  if mask:
+    delaycount = int(readcount * (1 - args.ratio / 100.0))
+  else:
+    delaycount = readcount
+  flags = 0x0030                        # groups 3+4 disabled: 16 channels
+  if args.pattern:
+    flags |= 0x0800                     # internal test pattern
+
+  cmds = b"\x00" * 5
+  cmds += lcmd(0xC0, mask) + lcmd(0xC1, value) + lcmd(0xC2, 0x08000000)
+  cmds += lcmd(0x80, divider)
+  cmds += bytes([0x81]) + struct.pack("<HH", readcount - 1, delaycount - 1)
+  cmds += lcmd(0x82, flags)
+
+  ser = _ols_open(args.port, args.baud, timeout=0.2)
+  with ser:
+    ser.reset_input_buffer()
+    ser.write(b"\x00" * 5 + b"\x02")
+    ident = ser.read(4)
+    print("1. ID           : %r" % ident)
+    if ident != b"1ALS":
+      sys.exit("ERROR: no OLS reply. Bitstream antminer_s9_ols loaded? Port/baud? "
+               "Is PulseView still holding the port?")
+    print("2. Settings     : %s, %d samples, divider %d, trigger mask 0x%04x value 0x%04x%s"
+          % (rate_string(rate), readcount * 4, divider, mask, value,
+             ", internal pattern" if args.pattern else ""))
+    ser.write(cmds)
+    ser.write(b"\x01")                      # Arm
+    t_arm = time.time()
+    print("3. Armed        : waiting for trigger + capture ( LED D6 on while waiting )")
+    want = readcount * 4 * 2
+    data = bytearray()
+    t_first = None
+    t_last = time.time()
+    while len(data) < want:
+      chunk = ser.read(min(4096, want - len(data)))
+      now = time.time()
+      if chunk:
+        if t_first is None:
+          t_first = now
+          print("4. First byte   : %.3f s after arm" % (now - t_arm))
+        data += chunk
+        t_last = now
+      elif t_first is None and now - t_arm > args.timeout:
+        ser.write(b"\x00" * 5)
+        sys.exit("ERROR: no data %d s after arm. Trigger never matched? "
+                 "( LED D6 still on? ) Try without --trigger." % args.timeout)
+      elif t_first is not None and now - t_last > 1.0:
+        break
+  print("5. Received     : %d of %d bytes in %.2f s" %
+        (len(data), want, (t_last - t_first) if t_first else 0))
+  n = len(data) // 2
+  if n == 0:
+    sys.exit("ERROR: no samples")
+  smp = [data[2*i] | (data[2*i+1] << 8) for i in range(n)][::-1]  # oldest first
+  print("6. First samples: %s" % " ".join("%04x" % v for v in smp[:8]))
+  changes = sum(1 for i in range(1, n) if smp[i] != smp[i-1])
+  active = 0
+  for i in range(1, n):
+    active |= smp[i] ^ smp[i-1]
+  print("   Toggling ch  : %s ( %d changes )" %
+        (",".join(str(b) for b in range(16) if active >> b & 1) or "none", changes))
+
+  out = args.output
+  with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr("version", "2")
+    meta = "[global]\nsigrok version=0.5.2\n\n[device 1]\ncapturefile=logic-1\n"
+    meta += "total probes=16\nsamplerate=%s\ntotal analog=0\n" % rate_string(rate)
+    for k in range(16):
+      meta += "probe%d=D%d\n" % (k + 1, k)
+    meta += "unitsize=2\n"
+    zf.writestr("metadata", meta)
+    zf.writestr("logic-1-1", b"".join(struct.pack("<H", v) for v in smp))
+  print("7. Saved        : %s ( open in PulseView: File > Open )" % os.path.abspath(out))
+  if args.open:
+    launch_pulseview(out, args.pulseview)
+  return 0
+
+
 def main():
   p = argparse.ArgumentParser(description="XC7Z010 SUMP3 logic analyzer launcher")
   sub = p.add_subparsers(dest="cmd")
@@ -239,6 +367,19 @@ def main():
   o.add_argument("--port", required=True, help="COM5, /dev/ttyUSB0 or socket://host:port")
   o.add_argument("--baud", type=int, default=921600)
 
+  c = sub.add_parser("ols-capture", help="One OLS capture without PulseView ( diagnostics + .sr )")
+  c.add_argument("--port", required=True, help="COM5, /dev/ttyUSB0 or socket://host:port")
+  c.add_argument("--baud", type=int, default=921600)
+  c.add_argument("--rate", default="1M", help="Samplerate, e.g. 100M, 1M, 200k")
+  c.add_argument("--samples", type=int, default=65536)
+  c.add_argument("--trigger", help="Level trigger, e.g. 0=0 or 0=0,4=1")
+  c.add_argument("--ratio", type=float, default=10.0, help="Pre-trigger percent")
+  c.add_argument("--pattern", action="store_true", help="Internal test pattern")
+  c.add_argument("--timeout", type=int, default=10, help="Seconds to wait for data")
+  c.add_argument("-o", "--output", default="ols_capture.sr")
+  c.add_argument("--open", action="store_true", help="Open the result in PulseView")
+  c.add_argument("--pulseview", help="Path to pulseview executable")
+
   args = p.parse_args()
   if args.cmd == "server":
     sys.exit(cmd_server(args))
@@ -248,6 +389,8 @@ def main():
     sys.exit(cmd_view(args))
   elif args.cmd == "ols-probe":
     sys.exit(cmd_ols_probe(args))
+  elif args.cmd == "ols-capture":
+    sys.exit(cmd_ols_capture(args))
   p.print_help()
 
 
