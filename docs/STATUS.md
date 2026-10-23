@@ -76,6 +76,12 @@ Masalah build yang sudah diatasi:
     lwIP link check dimatikan, reset sekali, delay RGMII RX/TX tetap aktif (`rgmii-id`),
     autonegosiasi 10/100/1000, kecepatan GEM + clock GEM0 mengikuti link. Setelah ELF lama
     jalan, PHY baru pulih dengan cabut daya 12 V (tidak ada jalur reset PHY dari Zynq).
+13. PulseView Windows tidak menemukan la16 lewat TCP ("No la16 IDENT reply"), padahal board
+    membalas IDENT dalam ~1 ms. Bug libsigrok: `sr_fd_is_readable()` (`src/tcp.c`) hanya punya
+    jalur poll/select POSIX; di MinGW selalu FALSE, jadi read non-blocking `tcp-raw` tidak
+    pernah melihat data. `host/sigrok/libsigrok-tcp-win32-readable.patch` memakai `select()`
+    Winsock (diuji di Windows terhadap board). Perlu installer baru dari CI. Catatan: installer
+    run 39973273719 (`dbda1f4`) sudah berisi perbaikan drain; installer `f95c813` belum.
 
 Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform\export\...`):
 `TCP_WND 16384`, `TCP_SND_BUF 32768`, `MEM_SIZE 262144`, `PBUF_POOL_SIZE 2048`, `LWIP_DHCP 0`,

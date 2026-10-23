@@ -1,0 +1,24 @@
+diff --git a/src/tcp.c b/src/tcp.c
+index 33074b5..1424851 100644
+--- a/src/tcp.c
++++ b/src/tcp.c
+@@ -93,6 +93,19 @@ SR_PRIV gboolean sr_fd_is_readable(int fd)
+ 		return FALSE;
+ 
+ 	return TRUE;
++#elif defined _WIN32
++	/*
++	 * MinGW has neither <poll.h> nor <sys/select.h>, but Winsock has
++	 * select(). Without this, non-blocking tcp-raw reads never see data.
++	 */
++	fd_set rfds;
++	struct timeval tv;
++
++	FD_ZERO(&rfds);
++	FD_SET((SOCKET)fd, &rfds);
++	memset(&tv, 0, sizeof(tv));
++
++	return select(0, &rfds, NULL, NULL, &tv) > 0;
+ #elif HAVE_SELECT
+ 	fd_set rfds;
+ 	struct timeval tv;

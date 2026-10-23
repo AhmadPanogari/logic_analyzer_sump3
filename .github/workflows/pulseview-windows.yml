@@ -1,6 +1,7 @@
 # PulseView Windows installer with the patches in host/sigrok/:
 #   libsigrok-ols-rx-robust.patch  OLS driver: repeated runs on Windows
 #   libsigrok-la16-driver.patch    la16 driver ( docs/PROTOCOL_LA16.md )
+#   libsigrok-tcp-win32-readable.patch  tcp-raw: non-blocking reads see data on Windows
 #
 # Same recipe as sigrok's nightly ( github.com/sigrokproject/sigrok-build ),
 # but MXE is built on the runner: sigrok's prebuilt image
@@ -95,10 +96,11 @@ jobs:
           path: mxe
           key: mxe-${{ env.MXE_COMMIT }}-${{ env.MXE_TARGETS }}-v1
 
-      - name: sigrok libraries ( libsigrok with the OLS patch and la16 driver )
+      - name: sigrok libraries ( libsigrok with the OLS patch, la16 driver, tcp-raw fix )
         run: |
           cd sigrok-build/ci/mxe
-          sed -i "/^cd libsigrok\$/a git apply $GITHUB_WORKSPACE/host/sigrok/libsigrok-ols-rx-robust.patch $GITHUB_WORKSPACE/host/sigrok/libsigrok-la16-driver.patch" \
+          P=$GITHUB_WORKSPACE/host/sigrok
+          sed -i "/^cd libsigrok\$/a git apply $P/libsigrok-ols-rx-robust.patch $P/libsigrok-la16-driver.patch $P/libsigrok-tcp-win32-readable.patch" \
             sigrok-mxe-build-dependencies.sh
           grep -n -A1 '^cd libsigrok$' sigrok-mxe-build-dependencies.sh
           . ./sigrok-mxe-init-toolchain.sh
