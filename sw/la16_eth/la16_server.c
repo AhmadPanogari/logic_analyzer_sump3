@@ -102,18 +102,61 @@ static u32 up_sent, up_start, up_ring, ddr_base, max_samples;
 static u8 end_flags, last_code = 0xFF, idle_code;
 static XTime t_arm, t_status;
 
+/*
+ * Upload profiling: build with LA16_PROFILE 1. Before END the server sends a
+ * text frame 0x8E with the time spent per step ( drivers ignore it ).
+ */
+#ifndef LA16_PROFILE
+#define LA16_PROFILE		0
+#endif
+#if LA16_PROFILE
+#include <stdio.h>
+#define R_PROFILE		0x8E
+enum { P_MAKE, P_WRITE, P_OUTPUT, P_OUTSIDE, P_N };
+static XTime prof[P_N], prof_mark, prof_exit;
+static u32 prof_frames, prof_full;
+#include "lwip/netif.h"
+static XTime prof_link;
+static u32 prof_pkts, prof_pbufs;
+static netif_linkoutput_fn prof_linkoutput;
+
+/* Time spent in the GEM driver, around netif->linkoutput */
+static err_t prof_link_out(struct netif *netif, struct pbuf *p)
+{
+	XTime t0, t1;
+	struct pbuf *q;
+	err_t e;
+
+	for (q = p; q; q = q->next)
+		prof_pbufs++;
+	prof_pkts++;
+	XTime_GetTime(&t0);
+	e = prof_linkoutput(netif, p);
+	XTime_GetTime(&t1);
+	prof_link += t1 - t0;
+	return e;
+}
+#define PROF_START()	XTime_GetTime(&prof_mark)
+#define PROF_ADD(i)	do { XTime t_; XTime_GetTime(&t_); prof[i] += t_ - prof_mark; \
+			     prof_mark = t_; } while (0)
+#else
+#define PROF_START()	do { } while (0)
+#define PROF_ADD(i)	do { } while (0)
+#endif
+
 static inline u32 reg_rd(u32 off) { return Xil_In32(REG_BASE + off); }
 static inline void reg_wr(u32 off, u32 v) { Xil_Out32(REG_BASE + off, v); }
 
-static u32 ms_since(XTime t)
+/* At least ms since t. Runs every main loop pass: no 64 bit division */
+static int elapsed(XTime t, u32 ms)
 {
 	XTime now;
 
 	XTime_GetTime(&now);
-	return (u32)((now - t) / (COUNTS_PER_SECOND / 1000));
+	return now - t >= (XTime)ms * (COUNTS_PER_SECOND / 1000);
 }
 
-/* CRC-8 ( poly 0x07 ) by table: the bitwise loop limited the upload to ~3 MB/s */
+/* CRC-8 ( poly 0x07 ) by table: every DATA frame runs it over ~1 KB */
 static u8 crc8_table[256];
 
 static void crc8_init(void)
@@ -202,6 +245,42 @@ static void send_end(u8 flags)
 {
 	u8 p[5];
 
+#if LA16_PROFILE
+	{
+		static u8 dirty[1536] __attribute__((aligned(32)));
+		char s[300];
+		u32 us = COUNTS_PER_SECOND / 1000000, i;
+		XTime t0, t1, t2;
+
+		/* What one 1460 byte TX packet costs in Xil_DCacheFlushRange() */
+		XTime_GetTime(&t0);
+		for (i = 0; i < 100; i++) {
+			memset(dirty, (int)i, 1460);
+			Xil_DCacheFlushRange((INTPTR)dirty, 1460);
+		}
+		XTime_GetTime(&t1);
+		for (i = 0; i < 100; i++)
+			memset(dirty, (int)i, 1460);
+		XTime_GetTime(&t2);
+		snprintf(s, sizeof(s), "make %lu us, tcp_write %lu us, tcp_output %lu us, "
+			 "outside %lu us, frames %lu, sndbuf full %lu, "
+			 "flush 1460 B %lu ns, linkoutput %lu us for %lu packets / %lu pbufs",
+			 (unsigned long)(prof[P_MAKE] / us), (unsigned long)(prof[P_WRITE] / us),
+			 (unsigned long)(prof[P_OUTPUT] / us), (unsigned long)(prof[P_OUTSIDE] / us),
+			 (unsigned long)prof_frames, (unsigned long)prof_full,
+			 (unsigned long)(((t1 - t0) - (t2 - t1)) * 10 / us),
+			 (unsigned long)(prof_link / us), (unsigned long)prof_pkts,
+			 (unsigned long)prof_pbufs);
+		prof_link = 0;
+		prof_pkts = prof_pbufs = 0;
+		queue(R_PROFILE, (const u8 *)s, strlen(s));
+		memset(prof, 0, sizeof(prof));
+		prof_frames = prof_full = 0;
+		prof_exit = 0;
+	}
+#endif
+	if (client)
+		tcp_nagle_disable(client);	/* the last segments go out now */
 	wl32(p, up_sent);
 	p[4] = flags;
 	queue(R_END, p, sizeof(p));
@@ -337,9 +416,7 @@ static u32 make_data(u8 *buf)
 		chunk = n - done;
 		if (chunk > up_ring - j)
 			chunk = up_ring - j;	/* stop at the ring end */
-		addr = ddr_base + 2 * j;
-		/* The PL wrote this through HP0, past the CPU caches */
-		Xil_DCacheInvalidateRange(addr & ~31u, ((addr & 31u) + 2 * chunk + 31) & ~31u);
+		addr = ddr_base + 2 * j;	/* cache flushed in poll_capture() */
 		memcpy(&p[4 + 2 * done], (const void *)(uintptr_t)addr, 2 * chunk);
 	}
 	up_sent += n;
@@ -373,7 +450,9 @@ static void pump_tx(void)
 			n = frame(buf, R_TRIGGER, p, 4);
 			st = S_DATA;
 		} else if (st == S_DATA) {
+			PROF_START();
 			n = make_data(buf);
+			PROF_ADD(P_MAKE);
 			if (up_sent >= cfg_total)
 				st = S_END;
 		} else {
@@ -382,8 +461,20 @@ static void pump_tx(void)
 		}
 		if (tcp_write(client, buf, n, TCP_WRITE_FLAG_COPY) != ERR_OK)
 			break;		/* Should not happen: room was checked */
+#if LA16_PROFILE
+		if (st == S_DATA || st == S_END) {
+			PROF_ADD(P_WRITE);
+			prof_frames++;
+		}
+#endif
 	}
+#if LA16_PROFILE
+	if (st == S_DATA)
+		prof_full++;
+#endif
+	PROF_START();
 	tcp_output(client);
+	PROF_ADD(P_OUTPUT);
 }
 
 static void poll_capture(void)
@@ -394,20 +485,34 @@ static void poll_capture(void)
 		return;
 	s = reg_rd(R_STATUS);
 	if (s & ST_DONE) {
+		/*
+		 * The PL wrote the ring through HP0, past the CPU caches, and does
+		 * not write it during the upload: one clean + invalidate of the
+		 * whole cache here drops stale lines of an earlier upload, instead
+		 * of Xil_DCacheInvalidateRange() on every DATA frame.
+		 */
+		Xil_DCacheFlush();
 		up_start = reg_rd(R_START);
 		up_ring = reg_rd(R_RING);
 		up_sent = 0;
 		end_flags = (s & ST_OVERFLOW) ? END_OVERFLOW : 0;
 		st = (cfg_tlm | cfg_trm | cfg_tfm) ? S_TRIGGER : S_DATA;
+		/*
+		 * Nagle during the upload: segments stay full ( 1460 bytes ) while
+		 * data is in flight, instead of one 1029 byte DATA frame per
+		 * segment whenever an ACK frees some room. send_end() turns it off.
+		 */
+		if (client)
+			tcp_nagle_enable(client);
 		send_status();			/* 4: upload */
 		return;
 	}
-	if (cfg_tmo && ((s & 7) == 1 || (s & 7) == 2) && ms_since(t_arm) >= cfg_tmo) {
+	if (cfg_tmo && ((s & 7) == 1 || (s & 7) == 2) && elapsed(t_arm, cfg_tmo)) {
 		reg_wr(R_CTRL, CTRL_ABORT);
 		send_end(END_TIMEOUT);
 		return;
 	}
-	if (status_code() != last_code || ms_since(t_status) >= STATUS_PERIOD_MS)
+	if (status_code() != last_code || elapsed(t_status, STATUS_PERIOD_MS))
 		send_status();
 }
 
@@ -498,6 +603,14 @@ int start_application(void)
 	max_samples = reg_rd(R_MAX_SAMPLES);
 	xil_printf("la16: ring at 0x%08x, %d samples\r\n", ddr_base, max_samples);
 	s9_phy_init();
+#if LA16_PROFILE
+	{
+		extern struct netif *echo_netif;	/* main.c */
+
+		prof_linkoutput = echo_netif->linkoutput;
+		echo_netif->linkoutput = prof_link_out;
+	}
+#endif
 
 	pcb = tcp_new_ip_type(IPADDR_TYPE_ANY);
 	if (!pcb || tcp_bind(pcb, IP_ANY_TYPE, LA16_TCP_PORT) != ERR_OK)
@@ -510,8 +623,18 @@ int start_application(void)
 
 int transfer_data(void)
 {
+#if LA16_PROFILE
+	XTime now;
+
+	XTime_GetTime(&now);
+	if (st == S_DATA && prof_exit)
+		prof[P_OUTSIDE] += now - prof_exit;	/* lwIP RX ( ACKs ), timers */
+#endif
 	s9_phy_poll();
 	poll_capture();
 	pump_tx();
+#if LA16_PROFILE
+	XTime_GetTime(&prof_exit);
+#endif
 	return 0;
 }

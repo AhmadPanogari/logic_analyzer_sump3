@@ -83,12 +83,13 @@ static void phy_wr(u32 reg, u16 v)
 	XEmacPs_PhyWrite(emac, PHY_ADDR, reg, v);
 }
 
-static u32 ms_since(XTime t)
+/* At least ms since t. s9_phy_poll() runs every main loop pass: no 64 bit division */
+static int elapsed(XTime t, u32 ms)
 {
 	XTime now;
 
 	XTime_GetTime(&now);
-	return (u32)((now - t) / (COUNTS_PER_SECOND / 1000));
+	return now - t >= (XTime)ms * (COUNTS_PER_SECOND / 1000);
 }
 
 /* 125 / 25 / 2.5 MHz for 1000 / 100 / 10 Mbit/s */
@@ -125,7 +126,7 @@ void s9_phy_init(void)
 
 	phy_wr(PHY_BMCR, BMCR_RESET);
 	XTime_GetTime(&t);
-	while ((phy_rd(PHY_BMCR) & BMCR_RESET) && ms_since(t) < 500)
+	while ((phy_rd(PHY_BMCR) & BMCR_RESET) && !elapsed(t, 500))
 		;
 
 	/* RGMII delays in the PHY ( rgmii-id ): on after reset, made sure here */
@@ -153,7 +154,7 @@ void s9_phy_poll(void)
 	u32 mbps;
 	int up, fd;
 
-	if (!emac || ms_since(t_poll) < 250)
+	if (!emac || !elapsed(t_poll, 250))
 		return;
 	XTime_GetTime(&t_poll);
 

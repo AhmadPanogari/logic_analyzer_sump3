@@ -90,6 +90,17 @@ Masalah build yang sudah diatasi:
     hanya lewat timeout 50 ms) → driver sekarang menguras koneksi tiap callback (maks. 20 ms),
     buffer 16 frame, callback 5 ms. Installer CI dengan driver ini: PulseView jauh lebih cepat
     (dilaporkan pengguna 24-10-2026, angka belum diukur).
+15. Upload tetap ±11,6 MB/s: **link laptop ↔ S9 hanya 100 Mbit/s** (Windows: Realtek GbE
+    `100 Mbps`; MDIO S9: kita mengiklankan 1000 (`GBCR 0x0300`), laptop tidak (`GBSR 0x0000`,
+    `ANLPAR 0xCDE1`)). 11,6 MB/s ≈ batas TCP di 100 Mbit. Dugaan: kabel 2 pasang / pasangan
+    putus → downshift Realtek. **Cek kabel Cat5e/Cat6 8 kawat.** Profil (`vitis_build.py
+    --profile`, frame 0x8E sebelum END) + sampling PC lewat JTAG menemukan dan memperbaiki:
+    ring TX GEM 64 BD < window 64 KB → "pack dropped, no space" di UART (±2 ms per pesan) +
+    retransmit → 256 BD TX/RX; pembagian 64-bit `ms_since()` tiap putaran loop → `elapsed()`;
+    satu segmen per frame DATA 1029 B → Nagle aktif selama upload (`send_end()` mematikannya,
+    capture kecil tetap ±1 ms); invalidate cache per frame → satu `Xil_DCacheFlush()` saat
+    upload mulai; `TCP_SND_BUF` 65535. Sekarang `linkoutput` ±6 µs/paket dan server lebih
+    banyak menunggu ACK daripada bekerja: di link 1 Gbit/s angkanya belum diukur.
 
 Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform\export\...`):
 `TCP_WND 16384`, `TCP_SND_BUF 32768`, `MEM_SIZE 262144`, `PBUF_POOL_SIZE 2048`, `LWIP_DHCP 0`,

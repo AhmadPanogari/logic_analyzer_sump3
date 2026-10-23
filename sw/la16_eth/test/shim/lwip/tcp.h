@@ -21,6 +21,7 @@ void tcp_recv(struct tcp_pcb *pcb, tcp_recv_fn fn);
 void tcp_err(struct tcp_pcb *pcb, tcp_err_fn fn);
 void tcp_arg(struct tcp_pcb *pcb, void *arg);
 void tcp_nagle_disable(struct tcp_pcb *pcb);
+void tcp_nagle_enable(struct tcp_pcb *pcb);
 uint32_t tcp_sndbuf(struct tcp_pcb *pcb);
 uint32_t tcp_sndqueuelen(struct tcp_pcb *pcb);
 err_t tcp_write(struct tcp_pcb *pcb, const void *data, uint32_t len, uint8_t flags);

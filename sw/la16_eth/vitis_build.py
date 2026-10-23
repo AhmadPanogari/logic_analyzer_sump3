@@ -4,9 +4,10 @@ or 2025.x ( unified, Python scripting ). Vivado and Vitis must be the same
 version: the platform step turns the XSA into a system device tree and fails
 ( "System DTS File does not exist" ) on an XSA from a newer Vivado.
 
-  vitis -s sw/la16_eth/vitis_build.py [xsa] [--ip 192.168.1.10] [--ws dir]
+  vitis -s sw/la16_eth/vitis_build.py [xsa] [--ip 192.168.1.10] [--ws dir] [--profile]
 
   xsa   default vivado/build_antminer_s9_la16eth/la_top.xsa
+  --profile  LA16_PROFILE=1: upload timing in a text frame 0x8E before END
   --ip  static board IP ( netmask 255.255.255.0, gateway x.x.x.1 ),
         default 192.168.1.10
   --ws  Vitis workspace ( deleted first ). Default on Windows: folder la16ws at the root of
@@ -15,10 +16,9 @@ version: the platform step turns the XSA into a system device tree and fails
         dependency file ... No such file or directory" ), so keep it short.
 
 Steps: platform from the XSA ( standalone, ps7_cortexa9_0 ) with lwip220
-( RAW API, static IP, 1 Gbit/s fixed link: the S9 PHY is a Broadcom part the
-lwIP PHY code does not know, the fixed setting only uses IEEE registers ),
-then the "lwIP Echo Server" template app with echo.c replaced by
-la16_server.c. The ELF is copied next to the XSA as la16_eth.elf, where
+( RAW API, static IP ), then the "lwIP Echo Server" template app with echo.c
+replaced by la16_server.c and s9_phy.c ( the S9's Broadcom PHY, which the
+lwIP PHY code does not know ). The ELF is copied next to the XSA as la16_eth.elf, where
 vivado/s9_jtag_load.tcl downloads and starts it.
 """
 import os
@@ -147,11 +147,17 @@ domain.set_lib(lib_name="lwip220")
 LWIP = (("lwip220_api_mode", "RAW_API"),
         ("lwip220_dhcp", "false"),
         ("lwip220_temac_phy_link_speed", "CONFIG_LINKSPEED1000"),
-        ("lwip220_tcp_snd_buf", "32768"),
+        # The upload waits on ACKs: the largest send buffer without window scaling
+        ("lwip220_tcp_snd_buf", "65535"),
         ("lwip220_tcp_wnd", "16384"),
         ("lwip220_mem_size", "262144"),
         ("lwip220_memp_n_tcp_seg", "1024"),
-        ("lwip220_pbuf_pool_size", "2048"))
+        ("lwip220_pbuf_pool_size", "2048"),
+        # 64 TX BDs is less than a 64 KB window in flight ( ~45 packets of
+        # 1-2 pbufs ): lwIP drops the packet, prints "pack dropped, no space"
+        # on the UART and TCP retransmits
+        ("lwip220_n_tx_descriptors", "256"),
+        ("lwip220_n_rx_descriptors", "256"))
 
 
 # lwIP's TCP timers run from xiltimer's interval timer ( main.c of the
@@ -225,6 +231,10 @@ if os.path.exists(user_cfg):
     # The template builds with -O0, too slow for the upload loop
     text = re.sub(r"set\(USER_COMPILE_OPTIMIZATION_LEVEL\s+-O\w*\)",
                   "set(USER_COMPILE_OPTIMIZATION_LEVEL -O2)", text)
+    if "--profile" in sys.argv:
+        text = re.sub(r'set\(USER_COMPILE_DEFINITIONS\s*\n""',
+                      'set(USER_COMPILE_DEFINITIONS\n"LA16_PROFILE=1"', text)
+        print("UserConfig.cmake: LA16_PROFILE=1")
     with open(user_cfg, "w") as f:
         f.write(text)
     print("UserConfig.cmake: echo.c -> la16_server.c + s9_phy.c ( %d place%s )"
