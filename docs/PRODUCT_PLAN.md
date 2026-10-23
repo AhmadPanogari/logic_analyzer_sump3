@@ -214,6 +214,38 @@ Catatan desain mode 3:
 Semua angka throughput adalah perkiraan dari kemampuan FT232H/FT2232H dan perlu diukur
 di P2.
 
+## 5e. Keputusan arsitektur: SUMP3 dan streaming
+
+SUMP3 asli adalah *triggered buffer*: encoder RLE di tiap pod (`sump3_rle_pod.v`) hanya
+menulis ke BRAM pod, dan isinya baru bisa dibaca setelah `acq_done` lewat jalur serial
+2-kabel pod → hub → core → LocalBus. `sump3.py` juga hanya mengenal arm → tunggu →
+download. **SUMP3 apa adanya tidak bisa streaming.**
+
+| Mode produk (5d) | Dengan SUMP3 |
+|---|---|
+| 1. Buffer 100 MHz | Langsung bisa dengan BRAM (±16 ribu event di FPGA kecil). Buffer ±1 juta event di SDRAM perlu modifikasi pod (RAM pod adalah BRAM terinferensi, bukan pengendali SDRAM) |
+| 2. Streaming RLE | Perlu modifikasi: sadap keluaran encoder RLE pod (`rle_wr_en`, `rle_wr_data`: satu word event kode + timestamp + data per perubahan, termasuk penanda rollover timestamp) → FIFO → USB |
+| 3. Streaming mentah | Bukan bagian SUMP3: blok terpisah sampel → FIFO → USB |
+
+Dua jalan:
+
+| | **A. Modifikasi SUMP3** | **B. Engine capture sendiri** |
+|---|---|---|
+| Isi | Tambah port streaming + dukungan SDRAM ke pod SUMP3 | RLE encoder + trigger + FIFO + SDRAM + USB ditulis sendiri (format RLE serupa) |
+| Kecepatan mulai | Cepat: encoder dan trigger sudah teruji di hardware | Lebih lama di awal |
+| Kendali desain | Terikat struktur SUMP3 (hub/pod/core, bus serial) | Penuh, dirancang untuk USB/streaming |
+| Lisensi | Turunan SUMP3 → **CERN OHL v1.2**; modifikasi wajib dibagikan | Bebas memilih lisensi, asal kode benar-benar ditulis sendiri (bukan turunan) |
+| Software | Driver libsigrok baru (sump3.py tidak mendukung streaming) | Driver libsigrok baru |
+
+Bagian tersulit sama di kedua jalan: **USB sync FIFO, pengendali SDRAM, front-end input,
+driver libsigrok**. Logika RLE sendiri relatif sederhana.
+
+**Keputusan:**
+- **Sampai P2: jalan A.** SUMP3 sebagai referensi dan prototipe cepat; sadap encoder RLE
+  untuk membuktikan streaming RLE lewat USB; blok streaming mentah dibuat di sampingnya.
+- **Sebelum P3: putuskan A atau B**, terutama berdasarkan model lisensi/bisnis (open
+  hardware penuh → A cocok; ingin bebas memilih lisensi → B).
+
 ## 6. Software
 
 | Komponen | Isi |
@@ -233,8 +265,8 @@ Fase 3 (driver libsigrok native).
 |---|---|---|
 | **P0** (selesai) | Prototipe S9: SUMP3 RLE, trigger, PulseView via VCD | Inti teknis terbukti |
 | **P1** | Software di hardware yang ada: client tanpa GUI + **driver libsigrok** (Fase 1+3 roadmap) | PulseView mengontrol SUMP3 langsung |
-| **P2** | Dev board FPGA kandidat + modul USB (FT2232H/FT232H) + front-end di breadboard. Implementasi **streaming RLE lewat USB** | Bukti throughput, pilihan FPGA final |
-| **P3** | PCB rev A: front-end, USB, flash, casing awal | Prototipe produk |
+| **P2** | Dev board FPGA kandidat + modul USB (FT2232H/FT232H) + front-end di breadboard. SUMP3 dimodifikasi (sadap encoder RLE) untuk **streaming RLE lewat USB**, + blok streaming mentah | Bukti throughput, pilihan FPGA final |
+| **P3** | Keputusan A/B (5e). PCB rev A: front-end, USB, flash, casing awal | Prototipe produk |
 | **P4** | PCB rev B, uji ketahanan input, uji EMC pra-sertifikasi, panduan | Kandidat produksi |
 | **P5** | Beta tester, sertifikasi, produksi PCBA, kemasan, harga | Rilis |
 
@@ -260,6 +292,8 @@ menghubungi BlackMesaLabs.
 - [ ] Rentang tegangan input dan tingkat proteksi
 - [ ] Memory depth: usulan streaming RLE + buffer ±1 juta event (SDRAM internal FPGA), lihat 5c
 - [x] Mode capture v1: **buffer 100 MHz + streaming RLE + streaming mentah** (lihat 5d)
+- [x] Arsitektur sampai P2: **modifikasi SUMP3** (sadap encoder RLE) + blok streaming mentah (lihat 5e)
+- [ ] Sebelum P3: tetap turunan SUMP3 (CERN OHL) atau engine capture sendiri (lihat 5e)
 - [ ] Analisis LCD SPI cepat (≥ 40 MHz) / frame penuh di SCLK tinggi: perlu samplerate
       lebih tinggi atau buffer lebih besar; tentukan apakah masuk target v1
 - [ ] Pilihan FPGA dan USB bridge (setelah P2)
