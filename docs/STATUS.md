@@ -59,7 +59,10 @@ Masalah yang sudah diatasi:
    `board`.
 4. `create_app_component`: "Platform ... s9_platform.xpfm does not exist in the repository"
    → `.xpfm` dicari lewat `client.find_platform_in_repos`, dengan cadangan pencarian di
-   workspace + `add_platform_repos` (commit 71c57d4). **Belum diuji pengguna.**
+   workspace + `add_platform_repos` (commit 71c57d4).
+5. Build FSBL macet → platform dibuat dengan `no_boot_bsp=True`.
+6. BSP gagal "opening dependency file ... No such file or directory": jalur Windows > 260
+   karakter. Workspace Vitis sekarang `D:\la16ws` (opsi `--ws`). **Belum diuji pengguna.**
 
 ## Langkah berikutnya
 

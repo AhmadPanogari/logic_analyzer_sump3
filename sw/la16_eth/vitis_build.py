@@ -4,11 +4,15 @@ or 2025.x ( unified, Python scripting ). Vivado and Vitis must be the same
 version: the platform step turns the XSA into a system device tree and fails
 ( "System DTS File does not exist" ) on an XSA from a newer Vivado.
 
-  vitis -s sw/la16_eth/vitis_build.py [xsa] [--ip 192.168.1.10]
+  vitis -s sw/la16_eth/vitis_build.py [xsa] [--ip 192.168.1.10] [--ws dir]
 
   xsa   default vivado/build_antminer_s9_la16eth/la_top.xsa
   --ip  static board IP ( netmask 255.255.255.0, gateway x.x.x.1 ),
         default 192.168.1.10
+  --ws  Vitis workspace ( deleted first ). Default on Windows: folder la16ws at the root of
+        the drive of the XSA. The BSP build makes paths of ~200 characters
+        below the workspace and fails past Windows' 260 ( "opening
+        dependency file ... No such file or directory" ), so keep it short.
 
 Steps: platform from the XSA ( standalone, ps7_cortexa9_0 ) with lwip220
 ( RAW API, static IP, 1 Gbit/s fixed link: the S9 PHY is a Broadcom part the
@@ -26,10 +30,12 @@ import vitis
 
 here = os.path.dirname(os.path.abspath(__file__))
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
-ip = "192.168.1.10"
-if "--ip" in sys.argv:
-    ip = sys.argv[sys.argv.index("--ip") + 1]
-    args = [a for a in args if a != ip]
+opts = {}
+for opt in ("--ip", "--ws"):
+    if opt in sys.argv:
+        opts[opt] = sys.argv[sys.argv.index(opt) + 1]
+        args = [a for a in args if a != opts[opt]]
+ip = opts.get("--ip", "192.168.1.10")
 xsa = os.path.abspath(args[0]) if args else os.path.normpath(
     os.path.join(here, "../../vivado/build_antminer_s9_la16eth/la_top.xsa"))
 if not os.path.isfile(xsa):
@@ -46,7 +52,12 @@ for k in [k for k in os.environ if k.lower() == "board"]:
     del os.environ[k]
 
 out_dir = os.path.dirname(xsa)
-ws = os.path.join(out_dir, "vitis_ws")
+if "--ws" in opts:
+    ws = os.path.abspath(opts["--ws"])
+elif os.name == "nt":
+    ws = os.path.splitdrive(out_dir)[0] + "\\la16ws"
+else:
+    ws = os.path.join(out_dir, "vitis_ws")
 if os.path.exists(ws):
     shutil.rmtree(ws)
 print("XSA      :", xsa)
@@ -99,7 +110,7 @@ def dump_logs(root):
     """Print the tail of every log Vitis left in the workspace."""
     for r, _, files in os.walk(root):
         for f in files:
-            if f.endswith(".log") or (f.endswith(".txt") and "qemu" not in r.lower()):
+            if f.endswith(".log"):
                 path = os.path.join(r, f)
                 try:
                     with open(path, errors="replace") as fh:
