@@ -17,10 +17,14 @@ PulseView ─TCP─► ARM: la16_server.c ( lwIP raw API )
 
 ## Build dan jalankan (Windows)
 
+**Vivado dan Vitis harus versi yang sama.** XSA dari Vivado yang lebih baru tidak bisa
+dibaca Vitis yang lebih lama (error *System DTS File does not exist*). Contoh untuk 2024.2:
+
 ```powershell
 cd D:\Project\internal\logic_analyzer_sump3_git\vivado
+set VIVADO=D:\Xilinx\Vivado\2024.2\bin\vivado.bat
 build.bat antminer_s9_la16eth
-D:\Xilinx\2025.2\Vitis\bin\vitis.bat -s ..\sw\la16_eth\vitis_build.py          # atau --ip 192.168.x.y
+D:\Xilinx\Vitis\2024.2\bin\vitis.bat -s ..\sw\la16_eth\vitis_build.py          # atau --ip 192.168.x.y
 s9_jtag_load.bat build_antminer_s9_la16eth
 ```
 

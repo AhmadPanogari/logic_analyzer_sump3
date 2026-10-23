@@ -1,6 +1,8 @@
 """
-Build the ARM program of the antminer_s9_la16eth bitstream with Vitis 2025.x
-( unified, Python scripting ):
+Build the ARM program of the antminer_s9_la16eth bitstream with Vitis 2024.2
+or 2025.x ( unified, Python scripting ). Vivado and Vitis must be the same
+version: the platform step turns the XSA into a system device tree and fails
+( "System DTS File does not exist" ) on an XSA from a newer Vivado.
 
   vitis -s sw/la16_eth/vitis_build.py [xsa] [--ip 192.168.1.10]
 
@@ -53,24 +55,37 @@ platform = client.create_platform_component(
     cpu="ps7_cortexa9_0", domain_name=domain_name)
 domain = platform.get_domain(name=domain_name)
 domain.set_lib(lib_name="lwip220")
-for param, value in (("lwip220_api_mode", "RAW_API"),
-                     ("lwip220_dhcp", "false"),
-                     ("lwip220_temac_phy_link_speed", "CONFIG_LINKSPEED1000"),
-                     ("lwip220_tcp_snd_buf", "32768"),
-                     ("lwip220_tcp_wnd", "16384"),
-                     ("lwip220_mem_size", "262144"),
-                     ("lwip220_memp_n_tcp_seg", "1024"),
-                     ("lwip220_pbuf_pool_size", "2048")):
-    try:
-        domain.set_config(option="lib", param=param, value=value, lib_name="lwip220")
-        print("lwip220: %s = %s" % (param, value))
-    except Exception as e:                      # keep going, report at the end
-        print("NOTE: lwip220 %s not set: %s" % (param, e))
+LWIP = (("lwip220_api_mode", "RAW_API"),
+        ("lwip220_dhcp", "false"),
+        ("lwip220_temac_phy_link_speed", "CONFIG_LINKSPEED1000"),
+        ("lwip220_tcp_snd_buf", "32768"),
+        ("lwip220_tcp_wnd", "16384"),
+        ("lwip220_mem_size", "262144"),
+        ("lwip220_memp_n_tcp_seg", "1024"),
+        ("lwip220_pbuf_pool_size", "2048"))
+
+
+def set_lwip(dom):
+    for param, value in LWIP:
+        try:
+            dom.set_config(option="lib", param=param, value=value, lib_name="lwip220")
+            print("lwip220: %s = %s" % (param, value))
+        except Exception as e:                  # keep going, report it
+            print("NOTE: lwip220 %s not set: %s" % (param, e))
+
+
+set_lwip(domain)
 platform.build()
 
 xpfm = os.path.join(ws, "s9_platform", "export", "s9_platform", "s9_platform.xpfm")
 app = client.create_app_component(name="la16_eth", platform=xpfm,
                                   domain=domain_name, template="lwip_echo_server")
+
+# The template asks for DHCP in its library settings; put ours back and
+# rebuild the BSP so the app links against them
+platform = client.get_component(name="s9_platform")
+set_lwip(platform.get_domain(name=domain_name))
+platform.build()
 
 src = os.path.join(ws, "la16_eth", "src")
 echo = os.path.join(src, "echo.c")
@@ -86,6 +101,11 @@ text, n = re.subn(r"IP4_ADDR\(&ipaddr,\s*\d+,\s*\d+,\s*\d+,\s*\d+\)",
                   "IP4_ADDR(&ipaddr, %d, %d, %d, %d)" % tuple(octets), text)
 text = re.sub(r"IP4_ADDR\(&gw,\s*\d+,\s*\d+,\s*\d+,\s*\d+\)",
               "IP4_ADDR(&gw, %d, %d, %d, 1)" % tuple(octets[:3]), text)
+# DHCP fallback ( only used if DHCP ends up enabled anyway )
+text = re.sub(r"IP4_ADDR\(&\(echo_netif->ip_addr\),\s*\d+,\s*\d+,\s*\d+,\s*\d+\)",
+              "IP4_ADDR(&(echo_netif->ip_addr), %d, %d, %d, %d)" % tuple(octets), text)
+text = re.sub(r"IP4_ADDR\(&\(echo_netif->gw\),\s*\d+,\s*\d+,\s*\d+,\s*\d+\)",
+              "IP4_ADDR(&(echo_netif->gw), %d, %d, %d, 1)" % tuple(octets[:3]), text)
 with open(main_c, "w") as f:
     f.write(text)
 print("main.c: static IP set ( %d place%s )" % (n, "" if n == 1 else "s"))
