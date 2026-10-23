@@ -1,0 +1,141 @@
+# PulseView Windows installer with host/sigrok/libsigrok-ols-rx-robust.patch.
+#
+# Same recipe as sigrok's nightly ( github.com/sigrokproject/sigrok-build ),
+# but MXE is built on the runner: sigrok's prebuilt image
+# ghcr.io/sigrokproject/sigrok-mxe is not pullable from other repositories.
+# The MXE toolchain is cached, so only the first run takes hours.
+#
+# Result: artifact "pulseview-ols-x86_64-installer" ( Actions -> run -> Artifacts ).
+name: PulseView Windows (OLS patch)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/pulseview-windows.yml
+      - host/sigrok/**
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  pulseview-mxe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    env:
+      MXE_COMMIT: b48b3cc7085548e896fe967dc6371ff9951390a4   # pinned by sigrok-build
+      MXE_DIR: ${{ github.workspace }}/mxe
+      MXE_TARGETS: x86_64-w64-mingw32.static.posix
+      MXE_PLUGIN_DIRS: plugins/examples/qt5-freeze
+      TARGET: x86_64
+      INSTALL_DIR: ${{ github.workspace }}/sr
+      GIT_CLONE: git clone --depth=1
+      WGET: wget -c --quiet
+      LIBSERIALPORT_REPO: git://sigrok.org/libserialport
+      LIBSIGROK_REPO: git://sigrok.org/libsigrok
+      LIBSIGROK_BRANCH: master
+      LIBSIGROKDECODE_REPO: git://sigrok.org/libsigrokdecode
+      SIGROK_FIRMWARE_REPO: git://sigrok.org/sigrok-firmware
+      SIGROK_FIRMWARE_FX2LAFW_REPO: git://sigrok.org/sigrok-firmware-fx2lafw
+      SIGROK_DUMPS_REPO: git://sigrok.org/sigrok-dumps
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake autopoint bison bzip2 flex g++ g++-multilib sdcc gettext \
+            git gperf gtk-doc-tools intltool libc6-dev-i386 libgdk-pixbuf2.0-dev \
+            libltdl-dev libssl-dev libtool-bin libxml-parser-perl lzip make openssl \
+            p7zip-full patch perl pkg-config python3 python-is-python3 ruby sed unzip \
+            wget xz-utils doxygen nsis cmake
+
+      - name: sigrok-build scripts
+        run: git clone --depth=1 https://github.com/sigrokproject/sigrok-build.git
+
+      - name: Restore MXE
+        id: mxe-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: mxe
+          key: mxe-${{ env.MXE_COMMIT }}-${{ env.MXE_TARGETS }}-v1
+
+      - name: Build MXE ( first run only, 2-4 h )
+        if: steps.mxe-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/mxe/mxe.git "$MXE_DIR"
+          cd "$MXE_DIR"
+          git reset --hard "$MXE_COMMIT"
+          patch -p1 < ../sigrok-build/docker/mxe_fixes.patch
+          patch -p1 < ../sigrok-build/docker/hidapi_fixes.patch
+          M="make -j$(nproc) MXE_USE_CCACHE= DONT_CHECK_REQUIREMENTS=1 MXE_TARGETS=$MXE_TARGETS MXE_PLUGIN_DIRS=$MXE_PLUGIN_DIRS"
+          $M gcc
+          $M glib
+          $M libzip libusb1 libftdi1 hidapi glibmm
+          $M qtbase qtimageformats qtsvg qttools qttranslations
+          $M boost
+          $M check gendef libieee1284 nettle qwt qtbase_CONFIGURE_OPTS='-no-sql-mysql'
+          rm -rf pkg .log log
+          df -h /
+
+      - name: Save MXE
+        if: steps.mxe-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mxe
+          key: mxe-${{ env.MXE_COMMIT }}-${{ env.MXE_TARGETS }}-v1
+
+      - name: sigrok libraries ( libsigrok with the OLS patch )
+        run: |
+          cd sigrok-build/ci/mxe
+          sed -i "/^cd libsigrok\$/a git apply $GITHUB_WORKSPACE/host/sigrok/libsigrok-ols-rx-robust.patch" \
+            sigrok-mxe-build-dependencies.sh
+          grep -n -A1 '^cd libsigrok$' sigrok-mxe-build-dependencies.sh
+          . ./sigrok-mxe-init-toolchain.sh
+          ./sigrok-mxe-build-dependencies.sh
+          echo "== libsigrok changes =="
+          git -C build/libsigrok log -1 --format='%h %s'
+          git -C build/libsigrok diff --stat
+
+      - name: PulseView
+        run: |
+          . sigrok-build/ci/mxe/sigrok-mxe-init-toolchain.sh
+          git clone --depth=1 https://github.com/sigrokproject/pulseview.git
+          mkdir -p pulseview/build
+          cd pulseview/build
+          $CMAKE -DCMAKE_INSTALL_PREFIX:PATH=$INSTALL_DIR -DCMAKE_BUILD_TYPE=Release \
+            -DDISABLE_WERROR=TRUE -DENABLE_TESTS=FALSE ..
+          make $PARALLEL
+          make install/strip
+
+      - name: NSIS installer
+        run: |
+          . sigrok-build/ci/mxe/sigrok-mxe-init-toolchain.sh
+          $WGET https://github.com/pbatard/libwdi/releases/download/b721/zadig-2.4.exe -O $INSTALL_DIR/zadig.exe
+          $WGET https://github.com/pbatard/libwdi/releases/download/v1.2.5/zadig_xp-2.2.exe -O $INSTALL_DIR/zadig_xp.exe
+          cp sigrok-build/ci/mxe/contrib-mxe/FileAssociation.nsh pulseview/build/contrib
+          makensis -DPE64=1 pulseview/build/contrib/pulseview_cross.nsi
+          cd pulseview/build/contrib
+          mv pulseview-*installer.exe pulseview-ols-$(date +%Y%m%d)-x86_64-installer.exe
+          ls -la *.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pulseview-ols-x86_64-installer
+          path: pulseview/build/contrib/pulseview-ols-*-installer.exe
+
+      - name: MXE logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mxe-logs
+          path: mxe/log
+          if-no-files-found: ignore
