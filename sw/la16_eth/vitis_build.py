@@ -38,6 +38,13 @@ octets = [int(x) for x in ip.split(".")]
 if len(octets) != 4:
     sys.exit("ERROR: --ip a.b.c.d")
 
+# The device tree generator takes its board file name from the environment
+# variable "board" ( any case on Windows ): an old "set BOARD=..." in this
+# cmd window gives "<name>.dtsi board file is not present in DTG"
+for k in [k for k in os.environ if k.lower() == "board"]:
+    print("NOTE: ignoring environment variable %s=%s" % (k, os.environ[k]))
+    del os.environ[k]
+
 out_dir = os.path.dirname(xsa)
 ws = os.path.join(out_dir, "vitis_ws")
 if os.path.exists(ws):
