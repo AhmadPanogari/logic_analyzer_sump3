@@ -3,6 +3,7 @@
 #
 #   cd vivado
 #   vivado -mode batch -source build.tcl -tclargs antminer_s9
+#   vivado -mode batch -source build.tcl -tclargs antminer_s9_ols
 #   vivado -mode batch -source build.tcl -tclargs zybo_z7_10
 #   vivado -mode batch -source build.tcl -tclargs arty_z7_10
 #
@@ -15,6 +16,8 @@
 #
 # Board selects ../constraints/<board>.xdc and the top level:
 #   antminer_s9           -> la_top_s9 ( clock = PS FCLK_CLK0, needs a PS7 block design )
+#   antminer_s9_ols       -> la_top_s9_ols ( same board, OLS/SUMP protocol for PulseView,
+#                            no SUMP3/MesaBus, uses constraints/antminer_s9.xdc )
 #   zybo_z7_10/arty_z7_10 -> la_top    ( clock = 125 MHz PL oscillator, PL only )
 # -----------------------------------------------------------------------------
 set board  [expr { [llength $argv] > 0 ? [lindex $argv 0] : "antminer_s9" }]
@@ -23,13 +26,16 @@ set part   xc7z010clg400-1
 set script_dir [file normalize [file dirname [info script]]]
 set root       [file normalize "$script_dir/.."]
 set out_dir    "$script_dir/build_$board"
-set board_xdc  "$root/constraints/$board.xdc"
+# Variant "<board>_ols" uses the base board pins with the OLS engine
+set ols_variant [string match "*_ols" $board]
+set pin_board   [expr { $ols_variant ? [string range $board 0 end-4] : $board }]
+set board_xdc  "$root/constraints/$pin_board.xdc"
 
 if { ![file exists $board_xdc] } {
   puts "ERROR: no constraints for board '$board' ( $board_xdc )"
   exit 1
 }
-if { ![file exists "$root/third_party/sump3/verilog/sump3_core.v"] } {
+if { !$ols_variant && ![file exists "$root/third_party/sump3/verilog/sump3_core.v"] } {
   puts "ERROR: third_party/ is empty ( SUMP3 + MesaBus sources are git submodules,"
   puts "       a GitHub \"Download ZIP\" does not include them ). From the repo root run:"
   puts "         python fetch_third_party.py"
@@ -45,8 +51,16 @@ proc find_file { dir name } {
   return ""
 }
 
-set use_ps [expr { $board eq "antminer_s9" }]
-set top    [expr { $use_ps ? "la_top_s9" : "la_top" }]
+set use_ps [expr { $pin_board eq "antminer_s9" }]
+if { $ols_variant && !$use_ps } {
+  puts "ERROR: the OLS variant currently exists for antminer_s9 only"
+  exit 1
+}
+if { $ols_variant } {
+  set top la_top_s9_ols
+} else {
+  set top [expr { $use_ps ? "la_top_s9" : "la_top" }]
+}
 
 file delete -force $out_dir
 file mkdir $out_dir
@@ -112,28 +126,36 @@ if { $use_ps } {
 }
 
 # Project RTL
-read_verilog "$root/rtl/la_core.v"
-read_verilog "$root/rtl/la_sump3.v"
 read_verilog "$root/rtl/la_test_pattern.v"
-if { $use_ps } {
-  read_verilog "$root/rtl/la_top_s9.v"
+if { $ols_variant } {
+  # OLS / SUMP engine for PulseView ( own RTL, no third party HDL )
+  read_verilog "$root/rtl/ols/ols_uart.v"
+  read_verilog "$root/rtl/ols/ols_engine.v"
+  read_verilog "$root/rtl/ols/la_ols_core.v"
+  read_verilog "$root/rtl/ols/la_top_s9_ols.v"
 } else {
-  read_verilog "$root/rtl/la_top.v"
-  read_verilog "$root/rtl/la_clk_gen.v"
-}
-read_verilog "$out_dir/time_stamp.v"
+  read_verilog "$root/rtl/la_core.v"
+  read_verilog "$root/rtl/la_sump3.v"
+  if { $use_ps } {
+    read_verilog "$root/rtl/la_top_s9.v"
+  } else {
+    read_verilog "$root/rtl/la_top.v"
+    read_verilog "$root/rtl/la_clk_gen.v"
+  }
+  read_verilog "$out_dir/time_stamp.v"
 
-# SUMP3 IP ( https://github.com/blackmesalabs/sump3 )
-set s3 "$root/third_party/sump3/verilog"
-read_verilog "$s3/sump3_core.v"
-read_verilog "$s3/sump3_rle_hub.v"
-read_verilog "$s3/sump3_rle_pod.v"
+  # SUMP3 IP ( https://github.com/blackmesalabs/sump3 )
+  set s3 "$root/third_party/sump3/verilog"
+  read_verilog "$s3/sump3_core.v"
+  read_verilog "$s3/sump3_rle_hub.v"
+  read_verilog "$s3/sump3_rle_pod.v"
 
-# MesaBus UART ( https://github.com/blackmesalabs/MesaBusProtocol )
-set mb "$root/third_party/MesaBusProtocol/verilog"
-foreach f { ft232_xface mesa_uart_phy mesa_uart mesa_tx_uart mesa_byte2ascii
-            mesa_ascii2nibble mesa_decode mesa2lb mesa_id mesa2ctrl } {
-  read_verilog "$mb/$f.v"
+  # MesaBus UART ( https://github.com/blackmesalabs/MesaBusProtocol )
+  set mb "$root/third_party/MesaBusProtocol/verilog"
+  foreach f { ft232_xface mesa_uart_phy mesa_uart mesa_tx_uart mesa_byte2ascii
+              mesa_ascii2nibble mesa_decode mesa2lb mesa_id mesa2ctrl } {
+    read_verilog "$mb/$f.v"
+  }
 }
 
 read_xdc $board_xdc

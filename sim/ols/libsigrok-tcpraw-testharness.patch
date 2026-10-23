@@ -1,0 +1,41 @@
+diff --git a/src/serial_tcpraw.c b/src/serial_tcpraw.c
+index 119abbe..0159e08 100644
+--- a/src/serial_tcpraw.c
++++ b/src/serial_tcpraw.c
+@@ -216,6 +216,27 @@ static int ser_tcpraw_setup_source_remove(struct sr_session *session,
+ 	return SR_OK;
+ }
+ 
++#include <sys/ioctl.h>
++
++/* Test harness patch: bytes waiting in the socket ( like a UART RX FIFO ). */
++static size_t ser_tcpraw_get_rx_avail(struct sr_serial_dev_inst *serial)
++{
++	int n = 0;
++
++	if (!serial || !serial->tcp_dev || serial->tcp_dev->sock_fd < 0)
++		return 0;
++	if (ioctl(serial->tcp_dev->sock_fd, FIONREAD, &n) < 0)
++		return 0;
++	return (n > 0) ? (size_t)n : 0;
++}
++
++/* Test harness patch: TCP has no TX FIFO to drain, report success. */
++static int ser_tcpraw_drain(struct sr_serial_dev_inst *serial)
++{
++	(void)serial;
++	return SR_OK;
++}
++
+ static int ser_tcpraw_write(struct sr_serial_dev_inst *serial,
+ 	const void *buf, size_t count,
+ 	int nonblocking, unsigned int timeout_ms)
+@@ -316,6 +337,8 @@ static struct ser_lib_functions serlib_tcpraw = {
+ 	.open = ser_tcpraw_open,
+ 	.close = ser_tcpraw_close,
+ 	.write = ser_tcpraw_write,
++	.drain = ser_tcpraw_drain,
++	.get_rx_avail = ser_tcpraw_get_rx_avail,
+ 	.read = ser_tcpraw_read,
+ 	.set_params = std_dummy_set_params,
+ 	.set_handshake = std_dummy_set_handshake,

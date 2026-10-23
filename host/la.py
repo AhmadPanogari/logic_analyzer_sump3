@@ -5,6 +5,7 @@ la.py : One launcher for the XC7Z010 SUMP3 logic analyzer host software.
   python host/la.py server --port COM5          # 1) start bd_server.py ( UART <-> TCP )
   python host/la.py gui                         # 2) start sump3.py ( arm / trigger / download )
   python host/la.py view capture.vcd            #    convert any SUMP3 VCD and open PulseView
+  python host/la.py ols-probe --port COM5       # check the OLS bitstream ( antminer_s9_ols )
 
 Data flow:
   FPGA --UART/MesaBus--> bd_server.py --TCP 21567--> sump3.py --save_vcd-->
@@ -166,6 +167,51 @@ def cmd_view(args):
   return subprocess.call(cmd + args.extra)
 
 
+def cmd_ols_probe(args):
+  """Talk OLS to the board without PulseView: ID + metadata."""
+  try:
+    import serial
+  except ImportError:
+    sys.exit("ERROR: pyserial missing. Run: pip install pyserial")
+  import struct
+  import time
+  port = args.port
+  if "://" in port:
+    ser = serial.serial_for_url(port, timeout=1)       # e.g. socket://host:port
+  else:
+    ser = serial.Serial(port, args.baud, timeout=1)
+  with ser:
+    ser.reset_input_buffer()
+    ser.write(b"\x00" * 5 + b"\x02")
+    ident = ser.read(4)
+    print("ID       : %r" % ident)
+    if ident != b"1ALS":
+      sys.exit("ERROR: no OLS device. Check bitstream ( antminer_s9_ols ), "
+               "port, baud ( %d ), TX/RX wiring." % args.baud)
+    ser.write(b"\x04")
+    time.sleep(0.05)
+    meta = ser.read(256)
+  i = 0
+  while i < len(meta):
+    key = meta[i]; i += 1
+    if key == 0:
+      break
+    kind = key >> 5
+    if kind == 0:
+      end = meta.index(b"\x00", i)
+      print("  0x%02x   : %s" % (key, meta[i:end].decode(errors="replace")))
+      i = end + 1
+    elif kind == 1:
+      print("  0x%02x   : %d" % (key, struct.unpack(">I", meta[i:i+4])[0]))
+      i += 4
+    else:
+      print("  0x%02x   : %d" % (key, meta[i]))
+      i += 1
+  print("OK: PulseView can use this port ( driver 'Openbench Logic Sniffer & SUMP "
+        "compatibles', baud %d )." % args.baud)
+  return 0
+
+
 def main():
   p = argparse.ArgumentParser(description="XC7Z010 SUMP3 logic analyzer launcher")
   sub = p.add_subparsers(dest="cmd")
@@ -189,6 +235,10 @@ def main():
   v.add_argument("extra", nargs=argparse.REMAINDER,
                  help="Extra options for sump3_vcd2sr.py ( e.g. --start 0.001 )")
 
+  o = sub.add_parser("ols-probe", help="Check the OLS bitstream: ID + metadata")
+  o.add_argument("--port", required=True, help="COM5, /dev/ttyUSB0 or socket://host:port")
+  o.add_argument("--baud", type=int, default=921600)
+
   args = p.parse_args()
   if args.cmd == "server":
     sys.exit(cmd_server(args))
@@ -196,6 +246,8 @@ def main():
     sys.exit(cmd_gui(args))
   elif args.cmd == "view":
     sys.exit(cmd_view(args))
+  elif args.cmd == "ols-probe":
+    sys.exit(cmd_ols_probe(args))
   p.print_help()
 
 

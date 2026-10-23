@@ -33,6 +33,7 @@ Di PulseView semua protocol decoder (UART, SPI, I2C, dll.) bisa langsung dipakai
 |---|---|
 | `rtl/la_core.v` | Logika inti (semua board): sinkronizer probe, MesaBus UART, SUMP3, pola uji, LED |
 | `rtl/la_top_s9.v` | Top level **Antminer S9**: clock dari PS7 `FCLK_CLK0` (100 MHz) |
+| `rtl/ols/` | **Mode OLS**: engine SUMP/OLS sendiri + top `la_top_s9_ols` (PulseView langsung) |
 | `rtl/la_top.v` | Top level Zybo/Arty Z7: MMCM 125 → 100 MHz dari oscillator PL |
 | `rtl/la_sump3.v` | Instance SUMP3: 1 hub (100 MHz), 2 RLE pod, View ROM (nama sinyal) |
 | `rtl/la_test_pattern.v` | Pola uji bawaan (UART, SPI, counter, PWM, pulse) |
@@ -48,6 +49,7 @@ Di PulseView semua protocol decoder (UART, SPI, I2C, dll.) bisa langsung dipakai
 | `host/s9_load_bitstream.sh` | Dijalankan di Linux board S9: muat bitstream lewat FPGA manager |
 | `docs/ROADMAP_PULSEVIEW.md` | Rencana pengembangan: PulseView sebagai GUI utama |
 | `docs/PRODUCT_PLAN.md` | Draf rencana produk logic analyzer consumer |
+| `sim/ols/` | Uji mode OLS: level pin (UART) + co-simulasi dengan driver OLS libsigrok |
 | `sim/` | Testbench Icarus Verilog (MesaBus UART → baca HW ID SUMP3) |
 | `fetch_third_party.py` | Mengisi `third_party/` (git submodule, atau unduh ZIP jika tanpa git) |
 | `third_party/sump3` | Submodule [blackmesalabs/sump3](https://github.com/blackmesalabs/sump3) |
@@ -500,6 +502,90 @@ python host/sump3_vcd2sr.py capture.vcd -r 100M --start 0.002 --end 0.004 --incl
 RLE bisa menghasilkan capture beberapa detik; pada 100 MHz, 1 detik = 100 juta sampel
 (PulseView menyimpan data tak terkompresi di RAM). Gunakan `--start/--end` untuk
 memperbesar area penting daripada desimasi.
+
+## Mode OLS: PulseView mengontrol langsung (Antminer S9)
+
+Varian bitstream **`antminer_s9_ols`** menjawab protokol **SUMP / Openbench Logic Sniffer
+(OLS)** langsung dari FPGA. PulseView memakai driver bawaannya *"Openbench Logic Sniffer &
+SUMP compatibles"* lewat port COM, sehingga **Run, samplerate, jumlah sampel, dan trigger
+diatur dari PulseView**. Mode ini tidak memakai `sump3.py`, `bd_server.py`, atau
+konversi VCD.
+
+Engine-nya (`rtl/ols/`) ditulis sendiri dari spesifikasi protokol SUMP/OLS publik dan
+tidak memakai HDL SUMP3, MesaBus, atau proyek lain. Pin dan clock sama dengan varian
+`antminer_s9`.
+
+| Item | Mode OLS (`antminer_s9_ols`) | Mode SUMP3 (`antminer_s9`) |
+|---|---|---|
+| Kontrol | **PulseView langsung** | `sump3.py` + bd_server, lalu Save_VCD ke PulseView |
+| Channel | 16 (D0–D15) | 16 + 32 internal |
+| Samplerate | **10 Hz – 100 MHz** (divider) | 100 MHz tetap |
+| Penyimpanan | **64K sampel mentah** (64K × 16 bit, 32 BRAM36) | 4096 event RLE |
+| Durasi | 655 µs @100 MHz, 65 ms @1 MHz, 6,5 s @10 kHz | 3 ms – 10 s, tergantung aktivitas |
+| Trigger | 4 stage mask/value, **level** 0/1 | OR/AND rising/falling |
+| UART | 921600 baud, 8N1 (channel B CJMCU) | 921600 autobaud (MesaBus) |
+| Download 64K sampel | ±1,4 s | beberapa detik |
+
+### Build dan muat
+
+```powershell
+cd vivado
+build.bat antminer_s9_ols
+cd ..
+D:\Xilinx\2025.2\Vivado\bin\xsdb.bat vivado\s9_jtag_load.tcl vivado\build_antminer_s9_ols
+```
+
+Wiring sama dengan mode SUMP3: JTAG di J10, USB-UART (channel B CJMCU) di J1 pin 11/12,
+probe di J5–J8, jumper pola uji di J9 pin 5. LED: D5 heartbeat, **D6 menyala = menunggu
+trigger**, D7 pola uji, D8 aktivitas UART.
+
+Cek komunikasi tanpa PulseView:
+
+```powershell
+python host\la.py ols-probe --port COM5
+```
+
+Hasilnya harus `ID: b'1ALS'` dan nama `AntMiner S9 LA`.
+
+### Di PulseView
+
+1. **Connect to a Device** (ikon perangkat di toolbar):
+   * Driver: **Openbench Logic Sniffer & SUMP compatibles**
+   * Interface: **Serial Port**, pilih port COM channel B CJMCU, baud rate **921600**
+   * **Scan for devices** → muncul *AntMiner S9 LA … with 16 channels* → OK
+2. Atur **jumlah sampel** (maks. 65536) dan **samplerate** (maks. 100 MHz) di toolbar.
+3. **Trigger** (opsional): klik nama channel, lalu pilih kondisi **0** atau **1**. OLS hanya
+   mendukung trigger level, tidak mendukung tepi. Untuk UART (idle tinggi), trigger
+   `D0 = 0` menangkap start bit pertama. Sampel pra-trigger dikumpulkan dulu sebelum
+   trigger aktif, jadi bagian sebelum trigger tidak berisi data basi.
+4. **Opsi perangkat** (ikon roda gigi): *Pattern mode = Internal* menampilkan pola uji
+   tanpa jumper. **Biarkan RLE = off**: mode RLE OLS tidak didukung, dan jika dinyalakan
+   bit tertinggi (D15) dipaksa 0.
+5. Klik **Run**. D6 menyala selama menunggu trigger, lalu data diunduh dan tampil.
+6. Tambahkan decoder (UART, SPI, I2C, …) seperti biasa.
+
+Tips samplerate: untuk SPI/LCD 10–25 MHz pakai 100 MHz (655 µs per capture). Untuk
+UART/I2C lambat, turunkan samplerate agar durasi lebih panjang, misalnya 1 MHz = 65 ms.
+
+### Verifikasi
+
+* `sim/ols/run_uart_sim.sh`: uji level pin `la_top_s9_ols` lewat UART 921600 (ID, 42 byte
+  metadata, 32 byte sampel).
+* `sim/ols/run_cosim.sh`: **driver OLS libsigrok asli** (sigrok-cli dari libsigrok git)
+  ⇄ TCP ⇄ cocotb ⇄ RTL `ols_engine` di Icarus. Lolos:
+
+  | Uji | Hasil |
+  |---|---|
+  | Scan | `AntMiner S9 LA FPGA version 1.0 with 16 channels`, maks. 65536 sampel |
+  | Urutan sampel @100 MHz (probe = counter) | 4096 sampel, 0 error |
+  | Divider ke 1 MHz | 2048 sampel, 0 error |
+  | Trigger nilai 0x1234, capture ratio 25 % | Tepat di sampel 1024 |
+  | Pattern Internal @1 MHz → decoder UART | `Hello SUMP3 PulseView` berulang |
+  | Pattern Internal @100 MHz → decoder SPI | Byte berurutan, 0 error |
+
+  Transport TCP libsigrok (`tcp-raw`) perlu patch kecil khusus pengujian
+  (`sim/ols/libsigrok-tcpraw-testharness.patch`). Driver OLS tidak diubah.
+* Belum diuji: build Vivado varian ini dan PulseView di board S9 sungguhan.
 
 ## Menambah / mengganti sinyal
 

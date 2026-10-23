@@ -282,6 +282,12 @@ driver libsigrok**. Logika RLE sendiri relatif sederhana.
 
 ## 5f. Alternatif Fase 2: protokol OLS langsung di FPGA
 
+> **Status (dibuat):** varian `antminer_s9_ols` dengan engine OLS sendiri (`rtl/ols/`):
+> 16 ch, 10 Hz–100 MHz, 64K sampel mentah, trigger 4 stage level. Lolos co-simulasi
+> dengan driver OLS libsigrok asli (scan, urutan sampel, divider, trigger, decoder
+> UART/SPI). Belum diuji di board. Engine ini juga menjadi langkah awal "jalan B"
+> (engine capture sendiri, bagian 5e).
+
 Terinspirasi logIP. Daripada bridge Python + COM virtual (`docs/ROADMAP_PULSEVIEW.md`
 Fase 2), FPGA menjawab protokol SUMP/OLS sendiri lewat USB-serial (FTDI VCP):
 
@@ -353,7 +359,7 @@ menghubungi BlackMesaLabs.
 - [x] Mode capture v1: **buffer 100 MHz + streaming RLE + streaming mentah** (lihat 5d)
 - [x] Arsitektur sampai P2: **modifikasi SUMP3** (sadap encoder RLE) + blok streaming mentah (lihat 5e)
 - [ ] Sebelum P3: tetap turunan SUMP3 (CERN OHL) atau engine capture sendiri (lihat 5e)
-- [ ] Langkah cepat PulseView: protokol OLS langsung di FPGA (5f) vs bridge Python (roadmap Fase 2)
+- [x] Langkah cepat PulseView: **protokol OLS langsung di FPGA** (5f), sudah dibuat (`antminer_s9_ols`)
 - [x] Sample-rate divider untuk mode buffer (5d), mengikuti logIP/Enxor
 - [ ] Analisis LCD SPI cepat (≥ 40 MHz) / frame penuh di SCLK tinggi: perlu samplerate
       lebih tinggi atau buffer lebih besar; tentukan apakah masuk target v1

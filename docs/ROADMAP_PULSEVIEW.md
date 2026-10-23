@@ -63,9 +63,11 @@ Fondasi untuk semua fase berikutnya. Isinya mengambil logika hardware dari `sump
 
 ## Fase 2: Bridge OLS/SUMP (`host/sump3_ols_bridge.py`)
 
-> Alternatif yang sedang dipertimbangkan: protokol OLS dijawab **langsung oleh FPGA**
-> lewat USB-serial FTDI (seperti [logIP](https://github.com/meiniKi/logIP)), tanpa bridge
-> Python dan tanpa com0com. Lihat `docs/PRODUCT_PLAN.md` bagian 5f.
+> **Status:** alternatifnya sudah dibuat. Protokol OLS dijawab **langsung oleh FPGA**
+> (varian bitstream `antminer_s9_ols`, `rtl/ols/`), sehingga bridge Python + com0com
+> tidak lagi diperlukan untuk PulseView. Lihat README bagian *Mode OLS*. Engine OLS ini
+> merekam sampel mentah (64K), bukan RLE SUMP3. Bridge di bawah tetap relevan bila ingin
+> PulseView mengontrol **SUMP3 RLE**.
 
 PulseView memilih driver **"Openbench Logic Sniffer & SUMP compatibles"**, lalu
 bridge menerjemahkan perintahnya ke SUMP3 lewat `sump3_client.py`.

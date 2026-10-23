@@ -11,3 +11,7 @@ sim/build/
 host/work/
 __pycache__/
 *.sr
+# cocotb co-simulation
+sim/ols/sim_build/
+sim/ols/build_cosim/
+sim/ols/results.xml
