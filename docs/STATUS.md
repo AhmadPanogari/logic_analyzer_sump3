@@ -64,6 +64,28 @@ Masalah yang sudah diatasi:
 6. BSP gagal "opening dependency file ... No such file or directory": jalur Windows > 260
    karakter. Workspace Vitis sekarang `D:\la16ws` (opsi `--ws`). **Belum diuji pengguna.**
 
+Cara mengambil log lengkap (output terminal terlalu panjang dan terpotong):
+`vitis -s ..\sw\la16_eth\vitis_build.py > vitis_out.txt 2>&1`, lalu lampirkan
+`vivado\vitis_out.txt`.
+
+**Perlu dicek di log build berikutnya: pengaturan lwIP benar-benar masuk ke BSP?**
+Skrip mencetak `lwip220: lwip220_tcp_wnd = 16384` dan seterusnya (`set_config` tidak error),
+tapi CMakeCache BSP di log gagal sebelumnya masih berisi `lwip220_tcp_wnd:STRING=2048` dan
+`lwip220_temac_phy_link_speed:STRING=CONFIG_LINKSPEED_AUTODETECT` (nilai bawaan). Bisa jadi itu
+cache sebelum pengaturan diterapkan, bisa juga `set_config` tidak berpengaruh. Cek setelah build
+berhasil:
+
+* `D:\la16ws\s9_platform\ps7_cortexa9_0\standalone_ps7_cortexa9_0\bsp\include\lwipopts.h`
+  (atau cari `lwipopts.h` di `D:\la16ws`): harus ada `TCP_WND 16384`, `TCP_SND_BUF 32768`,
+  `MEM_SIZE 262144`, `PBUF_POOL_SIZE 2048`, `LWIP_DHCP 0`.
+* Cari `CONFIG_LINKSPEED1000` di header BSP (`xlwipconfig.h`).
+
+Kalau tidak masuk: Ethernet tetap jalan, tapi upload lambat (window 2 KB) dan autodetect
+PHY Broadcom bisa gagal (link tidak terbentuk). Perbaikannya: cari nama parameter yang benar
+(Vitis 2024.2: `domain.get_config(option="lib", lib_name="lwip220")` atau
+`domain.list_params(...)`), atau ubah `lwipopts.h`/CMakeCache lalu `domain.regenerate()` +
+`platform.build()`.
+
 ## Langkah berikutnya
 
 1. `vitis_build.py` sampai menghasilkan `vivado\build_antminer_s9_la16eth\la16_eth.elf`.
