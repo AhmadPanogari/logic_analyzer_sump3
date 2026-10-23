@@ -136,6 +136,46 @@ Yang diukur di P2:
 Spesifikasi teknis kandidat (ketersediaan, harga, kapasitas BSRAM/SDRAM) harus dicek dari
 datasheet dan penjual sebelum membeli.
 
+## 5c. Memory depth
+
+Kedalaman dinyatakan dalam **event RLE** (perubahan sinyal), bukan sampel. Dua mode:
+
+1. **Buffer (trigger)**: event disimpan di memori board. Kapasitas = memori ÷ ukuran event
+   (48–64 bit: kode + timestamp + 16 channel).
+2. **Streaming RLE**: event dialirkan ke PC lewat USB. Durasi praktis tak terbatas selama
+   sinyal ≤ anggaran USB (±4 juta event/detik, perkiraan USB 2.0 sync FIFO ±35 MB/s,
+   ±8 byte/event).
+
+| Tingkat | Memori | Kapasitas event | Setara sampel mentah @100 MHz | Biaya tambahan |
+|---|---|---|---|---|
+| Prototipe S9 | BRAM | 4.096 | 41 µs | — |
+| BRAM FPGA kecil (mis. GW2AR-18, ±800 Kbit) | BRAM | ±16 ribu | 160 µs | Nol |
+| **SDRAM 64 Mbit dalam paket FPGA** (GW2AR-18) | SDRAM | **±1 juta** | 10 ms | **Nol** |
+| SDRAM eksternal 256 Mbit | SDRAM | ±4 juta | 40 ms | 1 chip |
+| DDR3 2 Gbit | DDR3 | ±32 juta | 0,34 s | DDR + PCB rumit |
+| **Streaming ke PC** | RAM PC | ratusan juta (1 GB ≈ 130 juta) | — | Nol |
+
+Durasi untuk sinyal yang **terus aktif** (lebih lama jika ada jeda diam):
+
+| Kapasitas | UART 115200 (±50 rb ev/s) | I2C 100 kHz (±250 rb ev/s) | SPI 1 MHz (±2 jt ev/s) |
+|---|---|---|---|
+| 16 rb | 0,3 s | 65 ms | 8 ms |
+| 1 jt | 20 s | 4 s | 0,5 s |
+| 4 jt | 80 s | 16 s | 2 s |
+| 32 jt | ±11 menit | ±2 menit | 16 s |
+| Streaming | tak terbatas | tak terbatas | tak terbatas |
+
+**Rekomendasi v1**: streaming RLE sebagai fitur utama + buffer ±1 juta event dari SDRAM
+internal FPGA (tanpa biaya BOM tambahan) untuk sinyal yang terlalu ramai bagi USB.
+Kasus terburuk (berubah tiap 10 ns) memakai mode *raw* 16 bit/sampel tanpa timestamp
+(±4 juta sampel ≈ 40 ms di SDRAM 64 Mbit), karena bandwidth tulis SDRAM bisa tidak cukup
+untuk event 64 bit pada 100 juta event/detik.
+
+Spesifikasi pemasaran yang jujur, misalnya: *"Buffer 1M transisi + streaming tanpa batas
+(hingga ±4 juta transisi/detik)"*, bukan "1M sampel".
+
+Semua kapasitas FPGA dan throughput USB di atas adalah perkiraan; ukur di P2.
+
 ## 6. Software
 
 | Komponen | Isi |
@@ -180,6 +220,6 @@ menghubungi BlackMesaLabs.
 - [x] Pasar awal: **Indonesia**
 - [ ] Target harga jual dan target BOM (menentukan pilihan FPGA dan front-end)
 - [ ] Rentang tegangan input dan tingkat proteksi
-- [ ] Streaming RLE saja, atau + memori eksternal untuk burst
+- [ ] Memory depth: usulan streaming RLE + buffer ±1 juta event (SDRAM internal FPGA), lihat 5c
 - [ ] Pilihan FPGA dan USB bridge (setelah P2)
 - [ ] Model distribusi: open hardware penuh, atau hardware terbuka + produk jadi berbayar
