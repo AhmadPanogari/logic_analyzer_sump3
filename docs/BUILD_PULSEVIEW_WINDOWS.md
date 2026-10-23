@@ -21,6 +21,28 @@ wsl --install -d Ubuntu-22.04
 Buka terminal Ubuntu. **Kerjakan semuanya di home Linux (`~`), jangan di `/mnt/c/...`**
 (akses file Windows dari WSL sangat lambat untuk build).
 
+### Alternatif: Ubuntu 22.04 di VMware
+
+Bisa dipakai sebagai pengganti WSL (langkah 0 dilewati). Atur VM dulu:
+
+* **CPU** 4 core atau lebih, **RAM** 8 GB atau lebih (Qt5 dan Boost butuh memori).
+* **Disk kosong** ±25 GB di dalam VM. Cek dengan `df -h ~`. Kalau kurang, perbesar
+  virtual disk lewat *VM Settings → Hard Disk → Expand*, lalu perbesar partisinya dengan
+  `gparted`.
+* Build di home VM (`~`), **jangan** di shared folder `/mnt/hgfs/...` (lambat, dan
+  symlink/permission bisa gagal).
+
+Menyalin file antara Windows dan VM, pilih salah satu:
+
+* **Shared folder**: *VM Settings → Options → Shared Folders*, lalu aktifkan folder repo.
+  Di VM file muncul di `/mnt/hgfs/<nama_share>/`. Kalau kosong, jalankan
+  `sudo vmhgfs-fuse .host:/ /mnt/hgfs -o allow_other`.
+* **Drag & drop** (butuh `open-vm-tools-desktop`).
+* **git clone** repo ini langsung di VM, branch `claude/determined-cerf-xd6tlq`.
+
+Di langkah 3 dan 5, ganti `/mnt/c/Users/<user>/Downloads/...` dengan path shared folder
+tersebut.
+
 ## 1. Paket build
 
 ```bash
