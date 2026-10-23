@@ -653,7 +653,8 @@ jumper baud sama dengan mode OLS):
   BRAM 64K sampel.
 * Trigger level + tepi naik/turun/keduanya, pra-trigger, timeout.
 * Frame `STATUS` saat capture, data dikirim **terlama dulu** dengan posisi trigger.
-* RTL: `rtl/la16/`. Uji unit cocotb: `sim/la16` (`make`).
+* RTL: `rtl/la16/`. Uji unit cocotb: `sim/la16` (`make`, 7/7 lolos).
+* Build Vivado 2025.2: **Setup WNS +0,566 ns** di 100 MHz (lolos timing, 2 sampel per clock).
 * **Driver libsigrok `la16` belum dibuat**, jadi varian ini belum bisa dipakai dari
   PulseView. Untuk sekarang pakai `antminer_s9_ols`.
 
