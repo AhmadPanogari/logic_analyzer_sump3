@@ -12,6 +12,7 @@
 #   la_top.bit.bin  Linux FPGA manager ( byte swapped, like bootgen -process_bitstream )
 #   la_top.xsa      Hardware platform ( antminer_s9 only, for an FSBL )
 #   ps7_init.tcl    PS clock setup for JTAG only boot ( antminer_s9, s9_jtag_load.tcl )
+#                   and DDR init ( s9_ddr_test.tcl )
 #   *.rpt           Timing, utilization and I/O reports
 #
 # Board selects ../constraints/<board>.xdc and the top level:
@@ -93,6 +94,26 @@ if { $use_ps } {
     CONFIG.PCW_UART1_PERIPHERAL_ENABLE   {1}   \
     CONFIG.PCW_UART1_UART1_IO            {MIO 48 .. 49} \
   ] $ps7
+  # S9 DDR: 2x Samsung K4B2G1646F-BYMA ( DDR3L, 2 Gbit x16 each ) = 32 bit, 512 MB.
+  # Same geometry as Vivado's MT41K128M16 JT-125 ( 8 banks, 14 rows, 10 cols ).
+  # 533 MHz is the -1 speed grade limit; the chips are DDR3L-1866 parts.
+  # Used by s9_ddr_test.tcl only, s9_jtag_load.tcl still skips DDR init.
+  set_property -dict [list \
+    CONFIG.PCW_UIPARAM_DDR_MEMORY_TYPE      {DDR 3 (Low Voltage)} \
+    CONFIG.PCW_UIPARAM_DDR_PARTNO           {MT41K128M16 JT-125} \
+  ] $ps7
+  # Part presets can override the bus width and clock, so set those after it
+  set_property -dict [list \
+    CONFIG.PCW_UIPARAM_DDR_BUS_WIDTH        {32 Bit} \
+    CONFIG.PCW_UIPARAM_DDR_FREQ_MHZ         {533.333333} \
+    CONFIG.PCW_UIPARAM_DDR_TRAIN_WRITE_LEVEL {1} \
+    CONFIG.PCW_UIPARAM_DDR_TRAIN_READ_GATE  {1} \
+    CONFIG.PCW_UIPARAM_DDR_TRAIN_DATA_EYE   {1} \
+  ] $ps7
+  puts "PS7 DDR: [get_property CONFIG.PCW_UIPARAM_DDR_MEMORY_TYPE $ps7],\
+ [get_property CONFIG.PCW_UIPARAM_DDR_PARTNO $ps7],\
+ [get_property CONFIG.PCW_UIPARAM_DDR_BUS_WIDTH $ps7],\
+ [get_property CONFIG.PCW_UIPARAM_DDR_FREQ_MHZ $ps7] MHz"
 
   create_bd_intf_port -mode Master -vlnv xilinx.com:interface:ddrx_rtl:1.0 DDR
   create_bd_intf_port -mode Master -vlnv xilinx.com:display_processing_system7:fixedio_rtl:1.0 FIXED_IO
