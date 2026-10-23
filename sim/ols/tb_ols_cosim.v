@@ -46,7 +46,5 @@ module tb_ols_cosim;
     .armed     ( armed                      ),
     .capturing ( capturing                  )
   );
-  always @ ( posedge clk ) if ( rx_valid ) $display( "RTL rx %h byte_idx %0d t=%0t", rx_byte, u_dut.byte_idx, $time );
-  always @ ( posedge clk ) if ( u_dut.cmd_meta ) $display( "RTL cmd_meta state %0d t=%0t", u_dut.state, $time );
 endmodule
 `default_nettype wire
