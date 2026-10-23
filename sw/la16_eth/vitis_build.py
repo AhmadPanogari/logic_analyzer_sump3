@@ -46,6 +46,40 @@ print("XSA      :", xsa)
 print("Workspace:", ws)
 print("Board IP :", ip)
 
+# Which Vivado wrote the XSA ( a zip ): must not be newer than this Vitis
+try:
+    import zipfile
+    with zipfile.ZipFile(xsa) as z:
+        for name in z.namelist():
+            if name.endswith((".json", ".xml")) and "/" not in name:
+                found = sorted(set(re.findall(rb"20[12]\d\.\d", z.read(name))))
+                if found:
+                    print("XSA %-20s mentions versions %s" % (name, b" ".join(found).decode()))
+except Exception as e:
+    print("NOTE: could not read the XSA: %s" % e)
+
+# Run the system device tree generator ourselves first: when it fails inside
+# create_platform_component, Vitis only says "System DTS File does not exist"
+import subprocess
+vitis_root = os.environ.get("XILINX_VITIS") or os.path.normpath(
+    os.path.join(os.path.dirname(vitis.__file__), "..", ".."))
+sdtgen = os.path.join(vitis_root, "bin", "sdtgen.bat" if os.name == "nt" else "sdtgen")
+sdt_dir = os.path.join(out_dir, "sdt_check")
+if os.path.exists(sdt_dir):
+    shutil.rmtree(sdt_dir)
+if os.path.isfile(sdtgen):
+    tcl = "sdtgen set_dt_param -xsa {%s} -dir {%s}; sdtgen generate_sdt" % (
+        xsa.replace("\\", "/"), sdt_dir.replace("\\", "/"))
+    print("Running:", sdtgen, "-eval", tcl)
+    res = subprocess.run([sdtgen, "-eval", tcl], capture_output=True, text=True)
+    print(res.stdout[-4000:])
+    print(res.stderr[-4000:])
+    if not os.path.isfile(os.path.join(sdt_dir, "system-top.dts")):
+        sys.exit("ERROR: sdtgen did not produce system-top.dts, see its output above")
+    print("sdtgen OK: %s" % os.path.join(sdt_dir, "system-top.dts"))
+else:
+    print("NOTE: %s not found, skipping the sdtgen check" % sdtgen)
+
 client = vitis.create_client()
 client.set_workspace(path=ws)
 
