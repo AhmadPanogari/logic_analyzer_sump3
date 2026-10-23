@@ -548,11 +548,20 @@ trigger**, D7 pola uji, D8 aktivitas UART.
 | terbuka | jumper | **230400** | ±5,7 s |
 | jumper | jumper | **115200** | ±11 s |
 
-Baud di PulseView / `ols-capture` harus sama dengan jumper. **PulseView 0.4.2 (libsigrok
-0.5.2) di Windows hanya stabil sampai ±5K sampel pada 921600**: driver OLS-nya membaca
-1 byte per poll sehingga kehilangan byte pada transfer panjang, lalu capture berhenti
-tanpa menampilkan data. Untuk PulseView 0.4.2, pakai **230400 atau 115200**.
-`ols-capture` (membaca per blok) aman di 921600.
+Baud di PulseView / `ols-capture` harus sama dengan jumper.
+
+**Catatan PulseView 0.4.2 (libsigrok 0.5.2, libserialport 0.1.1) di Windows**, hasil uji di
+board S9:
+
+| Kondisi | Hasil |
+|---|---|
+| 921600 / 230400, > 5K sampel | Gagal: driver OLS membaca 1 byte per poll dan kehilangan byte (diperparah Log level 5) |
+| **115200, Log level default**, 50K @1 MHz | **Berhasil** pada Run pertama |
+| Run kedua / ganti jumlah sampel | Gagal: `serial-libsp: Read error (995)` (operasi baca yang dibatalkan, bug libserialport lama) |
+
+Saran: pakai **115200**, Log level default, dan **sambungkan ulang perangkat** (Connect →
+Scan → OK) sebelum setiap Run. Atau pakai **PulseView nightly** (libserialport baru), atau
+`ols-capture` (membaca per blok, aman di 921600).
 
 Cek komunikasi tanpa PulseView:
 
