@@ -40,6 +40,7 @@ Prototipe: board kontrol Antminer S9 bekas (Zynq XC7Z010-1CLG400, DDR3L 512 MB,
 | `la16_eth.elf` lewat `vitis_build.py` (Vitis 2024.2, workspace `D:\la16ws`) | ✅ build 24-10-2026 |
 | Ethernet S9: link + `ping 192.168.1.10` dari laptop (kabel langsung) | ✅ board 24-10-2026 |
 | PulseView Windows menemukan la16 lewat Raw TCP (installer dengan `libsigrok-tcp-win32-readable.patch`) | ✅ board 24-10-2026 |
+| Upload la16 lewat Ethernet: server 11,4 MB/s (`-O2`, CRC tabel), driver menguras koneksi | ✅ board 24-10-2026 |
 
 ## Sedang dikerjakan
 
@@ -87,7 +88,8 @@ Masalah build yang sudah diatasi:
     **11,4 MB/s** (5,7 M sampel/s, 4M dan 40M sampel utuh) setelah CRC-8 tabel + aplikasi
     `-O2`. Driver la16 di Windows dibatasi ±40 KB/s (satu baca 2 KB per callback, callback
     hanya lewat timeout 50 ms) → driver sekarang menguras koneksi tiap callback (maks. 20 ms),
-    buffer 16 frame, callback 5 ms. **Driver baru belum di-build CI / diuji di PulseView.**
+    buffer 16 frame, callback 5 ms. Installer CI dengan driver ini: PulseView jauh lebih cepat
+    (dilaporkan pengguna 24-10-2026, angka belum diukur).
 
 Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform\export\...`):
 `TCP_WND 16384`, `TCP_SND_BUF 32768`, `MEM_SIZE 262144`, `PBUF_POOL_SIZE 2048`, `LWIP_DHCP 0`,
