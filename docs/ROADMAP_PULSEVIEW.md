@@ -140,6 +140,64 @@ Driver OLS di libsigrok berkomunikasi lewat **port serial**.
 - [ ] Channel tambahan dari konektor J2–J4 (12 I/O).
 - [ ] Capture 200 MHz (FCLK0/MMCM), atau pod tanpa RLE untuk sinyal yang sangat rapat.
 
+## Fase 5 (opsional): Deep capture ke DDR dan streaming lewat Ethernet
+
+SUMP3 adalah *triggered buffer*. Data pod hanya bisa dibaca lewat jalur serial 2-kabel
+(pod → hub → core → LocalBus) setelah capture berhenti, jadi SUMP3 sendiri **tidak bisa
+streaming**. Fase ini menambahkan blok capture baru **di samping** SUMP3, yang menulis
+langsung ke DDR3 board S9 lewat port AXI HP Zynq. Gagasan kompresi RLE dari SUMP3 dipakai
+ulang.
+
+### Hitungan bandwidth (board S9)
+
+| Jalur | Kapasitas | 16 ch @ 100 MHz (200 MB/s mentah)? |
+|---|---|---|
+| FPGA → DDR3 lewat AXI HP | ratusan MB/s (DDR3-1066, 32-bit, ±4,3 GB/s puncak) | Ya |
+| DDR 512 MB sebagai buffer | ±256 MB dapat dipakai | Ya: ±1,3 s data mentah, jauh lebih lama dengan RLE |
+| Ethernet S9 → PC | 100 Mbit/s (Fast Ethernet), ±11 MB/s efektif | Tidak untuk streaming kontinu |
+| UART MesaBus (sekarang) | ±0,09 MB/s | Tidak |
+
+### Dua mode yang dituju
+
+**5A. Deep capture (prioritas, paling realistis)**
+Capture 100 MHz × 16 ch ke DDR (mentah atau RLE), lalu dikirim ke PC lewat Ethernet
+setelah selesai. Kedalaman naik dari ±4096 event menjadi ratusan MB. Model kerjanya tetap
+trigger → tampil.
+
+**5B. Streaming kontinu (terbatas ±11 MB/s)**
+* Mentah: kira-kira **16 ch ≤ 5 MS/s** atau **8 ch ≤ 10 MS/s**.
+* RLE: total ±1 juta perubahan sinyal per detik di semua channel. Cukup untuk UART, I2C,
+  atau SPI lambat; tidak cukup untuk clock MHz yang terus berdetak.
+* Melebihi anggaran berarti data tertinggal: hardware harus mendeteksi dan melaporkan
+  **overflow**.
+
+### Pekerjaan
+
+- [ ] **5.1 RTL**: blok `la_stream` dengan sampler/RLE encoder, FIFO, penulis AXI HP
+      (atau AXI DMA) ke ring buffer di DDR, register kontrol/status lewat AXI GP0
+      (start, stop, trigger, pointer tulis, flag overflow). Dibuat terpisah dari SUMP3,
+      sehingga SUMP3 tetap ada untuk debug cepat.
+- [ ] **5.2 Boot PS penuh**: inisialisasi DDR dengan setting S9 yang benar, lalu Linux dari
+      microSD (mis. image Ardzy). Mode **JTAG saja tidak cukup**, karena `s9_jtag_load.tcl`
+      sengaja melewati inisialisasi DDR.
+- [ ] **5.3 Software ARM**: alokasi buffer DMA (reserved memory / CMA) + akses via UIO
+      atau driver kecil; server TCP yang mengirim data capture (5A) atau aliran kontinu (5B)
+      ke PC.
+- [ ] **5.4 Sisi PC**: client yang menerima data dan menulis `.sr` (5A, memakai writer dari
+      `sump3_vcd2sr.py`). Tampilan **live** di PulseView (5B) hanya mungkin lewat **driver
+      libsigrok native** (Fase 3), karena protokol OLS (Fase 2) tidak mendukung streaming.
+- [ ] **5.5 Uji bandwidth**: ukur throughput nyata AXI HP → DDR dan Ethernet → PC
+      (100 Mbit/s), uji deteksi overflow dengan pola uji yang sengaja terlalu ramai.
+- [ ] **5.6 Bonus**: `bd_server.py` dijalankan di Linux board, sehingga MesaBus/SUMP3 juga
+      bisa diakses lewat Ethernet tanpa adapter USB-UART.
+
+### Catatan
+
+* Board S9 tidak punya USB device untuk ke PC; jalur cepat ke PC hanyalah Ethernet
+  100 Mbit/s.
+* Alur 5A (deep capture) memberi manfaat terbesar dengan risiko paling kecil. 5B dibangun
+  di atas infrastruktur yang sama setelah 5A berjalan.
+
 ---
 
 ## Ringkasan prioritas
@@ -151,3 +209,5 @@ Driver OLS di libsigrok berkomunikasi lewat **port serial**.
 | 3 | Prototipe Fase 2.3 (scan via com0com) | Kepastian PulseView bisa melihat bridge |
 | 4 | Fase 2.1–2.2 (bridge lengkap) | **Run / trigger langsung dari PulseView** |
 | 5 | Fase 3 | Integrasi native, tanpa batasan OLS |
+| 6 | Fase 5A (deep capture DDR + Ethernet) | Buffer ratusan MB, tidak lagi terbatas BRAM |
+| 7 | Fase 5B (streaming kontinu) | Live di PulseView (butuh Fase 3), maks. ±11 MB/s |

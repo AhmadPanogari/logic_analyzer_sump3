@@ -492,6 +492,8 @@ dari PulseView ke hardware lewat bd_server, tanpa GUI `sump3.py`) ada di
    mengontrol SUMP3 (Windows: lewat COM virtual com0com).
 3. **Fase 3** (opsional): driver libsigrok native `sump3`.
 4. **Fase 4** (opsional): Ethernet, kedalaman RLE lebih besar, channel tambahan, 200 MHz.
+5. **Fase 5** (opsional): deep capture ke DDR3 lewat AXI HP + Ethernet, dan streaming
+   kontinu terbatas ±11 MB/s (Ethernet S9 100 Mbit/s). SUMP3 sendiri tidak bisa streaming.
 
 ## Lisensi
 
