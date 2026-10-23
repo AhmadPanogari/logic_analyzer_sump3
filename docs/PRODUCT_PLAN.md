@@ -1,29 +1,31 @@
 # Rencana Produk: Logic Analyzer Consumer
 
-Status: **draf**. Keputusan yang sudah diambil: **16 channel, 100 MHz, pasar awal
-Indonesia**. Angka komponen dan pesaing masih perlu divalidasi (harga, ketersediaan).
+Status: **draf**. Keputusan yang sudah diambil: **16 channel, pasar awal Indonesia,
+target spesifikasi: mengalahkan Kingst LA2016** (200 MS/s di 16 ch, buffer ≥ 1 Gbit, lihat
+3c). Angka komponen dan pesaing masih perlu divalidasi (harga, ketersediaan).
 
 ## 0. Posisi produk (pasar Indonesia)
 
 ```
-Clone FX2 (murah, mudah didapat)        PRODUK INI                    Kingst / DSLogic / Saleae
-8 ch, 24 MHz (16 ch lebih rendah)  ◄──  16 ch, 100 MHz, RLE  ──►     16 ch 100+ MHz, tapi jarang
-sinyal maks. ±6 MHz praktis             harga terjangkau              dan mahal di Indonesia
-                                        dukungan lokal (Bahasa)
+Clone FX2 (murah, mudah didapat)        PRODUK INI                    Kingst LA2016 / DSLogic
+8 ch, 24 MHz (16 ch lebih rendah)  ◄──  16 ch, 200 MS/s, 1 Gbit,  ──► 16 ch 200 MS/s, 1 Gbit,
+sinyal maks. ±6 MHz praktis             RLE + streaming, ambang       ambang tetap, software sendiri
+                                        bisa diatur, PulseView        (kelas USB 3: Sipeed SLogic,
+                                        native, dukungan lokal         lihat 3)
 ```
 
 | Hal | Clone FX2 | **Produk ini (target)** | Kingst / sejenis |
 |---|---|---|---|
 | Channel | 8 (16 dengan samplerate lebih rendah) | **16** | 16 |
-| Samplerate | 24 MHz | **100 MHz** (resolusi 10 ns) | 100 MHz ke atas |
-| Sinyal praktis (≥ 4 sampel/periode) | ±6 MHz | **±25 MHz** | ±25 MHz ke atas |
-| Capture panjang | Streaming mentah USB, dibatasi 24 MHz | **Streaming RLE** di 100 MHz + **streaming mentah** ±16–20 MS/s (16 ch) | Buffer / streaming |
+| Samplerate | 24 MHz | **200 MS/s di 16 ch** (resolusi 5 ns) | 100–200 MS/s |
+| Sinyal praktis (≥ 4 sampel/periode) | ±6 MHz | **±50 MHz** (dibatasi front-end) | ±25–50 MHz |
+| Capture panjang | Streaming mentah USB, dibatasi 24 MHz | **Buffer 1 Gbit + RLE**, **streaming mentah** ±17 MS/s (16 ch), streaming RLE pada samplerate yang dipilih (lihat 5d) | Buffer (LA2016) / streaming |
 | Software | PulseView | **PulseView native** (open source) | Software sendiri |
 | Ketersediaan di Indonesia | Mudah | **Produksi / stok lokal** | Jarang, impor |
 | Dukungan | Tidak ada | **Panduan & dukungan Bahasa Indonesia** | Bahasa Inggris / Mandarin |
 
-Pesan utama: *"16 channel 100 MHz yang terjangkau, mudah didapat, langsung jalan di
-PulseView, dengan panduan Bahasa Indonesia."*
+Pesan utama: *"16 channel 200 MS/s dengan memori 1 Gbit, ambang yang bisa diatur,
+langsung jalan di PulseView, lebih murah dari LA2016, dengan panduan Bahasa Indonesia."*
 
 ## 1. Untuk siapa
 
@@ -58,12 +60,64 @@ ke PulseView, dan decoder protokol.
 | Kelas | Contoh | Ciri |
 |---|---|---|
 | Clone murah 8 ch 24 MHz | berbasis Cypress FX2 (driver `fx2lafw`) | Sangat murah, mudah didapat di Indonesia, streaming USB, didukung PulseView. Terbatas 24 MHz |
-| 16 ch 100–400 MHz | Kingst LA1010/LA2016, DSLogic (DreamSourceLab) | Software sendiri (DSView adalah fork PulseView). **Di Indonesia jarang dan mahal** |
+| 16 ch USB 2, 100–500 MS/s | Kingst LA1010/**LA2016**/LA5016, DSLogic Plus (DreamSourceLab) | Software sendiri (DSView adalah fork PulseView). **Di Indonesia jarang dan mahal** |
+| 16–32 ch **USB 3 streaming** | **Sipeed SLogic16U3** (±US$ 60–69: 16 ch @200 MS/s streaming, 0–10 V, ambang 0–6 V, sigrok/PulseView), **SLogic32U3** (±US$ 99–179: 32 ch @200 MS/s, 4 ch @1,4 GS/s, USB 3.2 ±800 MB/s, DDR3 2 Gbit sebagai buffer elastis, aplikasi SLogicView) | Spesifikasi teknis di atas target kita di harga yang mirip. **Pesaing terberat** |
 | Premium | Saleae Logic | Mahal, software sangat matang |
 
-Kesimpulan: secara global kelas "16 ch 100 MHz" sudah ramai, tetapi **di Indonesia ada
-celah**: pilihan yang mudah didapat hanya clone FX2 24 MHz, sedangkan kelas 100 MHz jarang
-dan mahal. Pembeda tambahan di bawah memperkuat posisi itu.
+Perbandingan samplerate saat **16 channel aktif bersamaan** (perkiraan, cek datasheet):
+
+| Produk | Maks. (sedikit ch) | 16 ch serentak | Mode |
+|---|---|---|---|
+| Clone FX2 | 24 MS/s (8 ch) | ±12 MS/s | Streaming USB 2 |
+| Kingst LA1010 | 100 MS/s (≤3 ch) | ±16 MS/s | Streaming USB 2 |
+| DSLogic Plus | 400 MS/s (≤4 ch) | ±100 MS/s | Buffer 256 Mbit |
+| **Kingst LA2016** | 200 MS/s | perlu dicek | Buffer 1 Gbit |
+| Sipeed SLogic16U3 | 800 MS/s (4 ch) | 200 MS/s | Streaming USB 3 |
+| Prototipe S9 (sekarang) | 100 MS/s | 100 MS/s | Buffer 64K (OLS) |
+| **Target produk** | 200 MS/s | **200 MS/s** | Buffer 1 Gbit + streaming USB 2 |
+
+Kesimpulan: secara global kelas ini sudah ramai, dan kelas USB 3 (Sipeed) sudah menawarkan
+200 MS/s streaming di harga ±US$ 60–69. Target realistis kita adalah **kelas USB 2 / buffer
+(Kingst LA2016)**: setara di samplerate dan memori, unggul di ambang, streaming, PulseView
+native, harga, dan dukungan lokal (3c). Bersaing langsung dengan Sipeed butuh USB 3 + DDR
+lebar dan bukan target v1.
+
+## 3c. Target: mengalahkan Kingst LA2016
+
+Spesifikasi LA2016 dari spec sheet lama dan toko (perlu dicek ulang): 16 ch, 200 MS/s,
+memori 1 Gbit (50M sampel per channel, sampai 10G terkompres), bandwidth input 40 MHz,
+pulsa minimum 12,5 ns, ambang tetap (< 0,8 V / > 1,6 V), mode buffer lewat USB 2, software
+KingstVIS (libsigrok punya driver `kingst-la2016`, firmware harus diekstrak dari KingstVIS),
+±US$ 300 di Newegg. **Harga di marketplace Indonesia perlu dicek.**
+
+| | LA2016 | **Target kita** | Cara |
+|---|---|---|---|
+| Samplerate 16 ch | 200 MS/s | **200 MS/s semua channel** | Pin dicuplik di kedua tepi clock 100 MHz (IDDR), 2 sampel per clock |
+| Memori | 1 Gbit | **≥ 1 Gbit DDR3** + RLE | DDR3 128 MB |
+| Kedalaman mentah | 50M sampel | 64M sampel (0,32 s @200 MS/s) | — |
+| Kedalaman RLE | 10G (terkompres) | Sebanding: entri RLE 64 bit di DDR | Format RLE `la16` |
+| Pulsa minimum | 12,5 ns | **5 ns** | 200 MS/s + front-end cepat |
+| Bandwidth input | 40 MHz | **≥ 50–100 MHz** | Comparator/buffer input cepat |
+| Ambang | Tetap | **Bisa diatur** (mis. 0,5–5 V) | DAC + comparator |
+| Streaming | Tidak ada | **±17 MS/s 16 ch, ±35 MS/s 8 ch** | USB 2 sync FIFO (FT232H) |
+| Upload 128 MB | USB 2 | ±4 s (USB 2 ±35 MB/s) | — |
+| PulseView | Perlu ekstrak firmware | **Native** | Driver `la16` (`docs/PROTOCOL_LA16.md`) |
+| Harga | (cek lokal) | **Di bawah LA2016 di Indonesia** | BOM dihitung di P2 |
+
+Jalur pembuktian:
+
+1. **Board S9 (tanpa beli hardware):** 200 MS/s lewat IDDR, buffer di DDR3 milik PS lewat
+   port AXI HP (400 MB/s tulis, teori port 800 MB/s). Bila DDR S9 256–512 MB, buffer
+   2–4 Gbit. Upload masih lewat UART (≤ ±1,2 MB/s), jadi S9 membuktikan samplerate,
+   trigger, dan kedalaman, bukan kecepatan upload. **Perlu dicek: tipe dan ukuran chip
+   DDR di board S9**, serta parameter DDR untuk PS7.
+2. **Hardware produk (P2):** dev board **Sipeed Tang Primer 20K** (Gowin GW2A-18 +
+   DDR3 128 MB = 1 Gbit, perlu dicek) + modul **FT232H** sync FIFO.
+3. **Front-end:** ambang yang bisa diatur, proteksi, bandwidth ≥ 50 MHz, diuji di
+   breadboard/PCB kecil bersamaan dengan P2.
+
+Risiko: pengendali DDR3 (PS di S9, IP DDR3 Gowin di produk) dan PCB 200 MS/s jauh lebih
+sulit dari tahap sebelumnya; harga LA2016 lokal bisa sudah rendah; KingstVIS matang.
 
 ## 3b. Proyek open source sejenis (dikaji Oktober 2026)
 
@@ -99,10 +153,12 @@ Pelajaran:
 
 ## 4. Kandidat pembeda
 
-1. **Capture sangat panjang di resolusi penuh lewat RLE**: hardware hanya mengirim
-   *perubahan*. Dengan streaming RLE lewat USB, sinyal biasa (UART, I2C, SPI tidak
-   kontinu) bisa direkam menit hingga jam di 100 MHz, tanpa harus menurunkan samplerate.
-   Ini cocok untuk menunggu bug yang jarang muncul.
+1. **Capture panjang lewat RLE**: hardware hanya mengirim *perubahan*, jadi link USB
+   cukup untuk sinyal biasa (UART, I2C, SPI tidak kontinu) dalam waktu lama. Batasnya
+   ada di PC: libsigrok/PulseView menyimpan sampel mentah, sehingga RAM yang terpakai
+   = samplerate × 2 byte/s (100 MHz = 200 MB/s). Rekaman menit sampai jam dilakukan di
+   samplerate 1–10 MHz. Resolusi penuh untuk durasi panjang butuh penyimpanan RLE di
+   sisi PC (modifikasi PulseView atau viewer sendiri), pembeda jangka panjang, bukan v1.
 2. **Native PulseView / sigrok (open source)**: driver libsigrok resmi (upstream), jadi
    tidak perlu software proprietary dan bisa memakai seluruh decoder sigrok.
 3. **Open hardware** (konsekuensi CERN OHL dari SUMP3) dijadikan nilai jual: desain
@@ -157,7 +213,7 @@ sebelum mendesain PCB sendiri.
 
 | Opsi | Komponen | Kelebihan | Kekurangan |
 |---|---|---|---|
-| **A (disarankan)** | Dev board **Gowin** (mis. Tang Nano 20K, GW2AR-18) + modul **FT232H/FT2232H** mode *245 sync FIFO* | FPGA murah, dicatu USB, mudah didapat di marketplace Indonesia, mendekati BOM produk. Toolchain Gowin EDA atau open source (Yosys + nextpnr) | Perlu porting SUMP3 ke Gowin (inferensi BSRAM, cek konstruksi Verilog) |
+| **A (disarankan)** | Dev board **Gowin Tang Primer 20K** (GW2A-18 + **DDR3 128 MB**) + modul **FT232H/FT2232H** mode *245 sync FIFO* | FPGA murah, memori 1 Gbit di board (target LA2016, 3c), mendekati BOM produk. Toolchain Gowin EDA (IP DDR3) | Pengendali DDR3 Gowin perlu dipelajari. Tang Nano 20K (SDRAM 64 Mbit) tidak cukup untuk target 1 Gbit |
 | B (eksperimen cepat) | Board **S9** yang sudah ada + modul FT232H/FT2232H kedua di konektor J1–J4 (8 data + 5 kontrol + CLKOUT 60 MHz) | Tidak perlu FPGA baru; SUMP3 sudah jalan | Bukan platform produk; kabel jumper di 60 MHz rawan; CJMCU yang sekarang dipakai untuk JTAG (channel A) tidak bisa sekaligus jadi sync FIFO |
 
 Yang diukur di P2:
@@ -219,7 +275,7 @@ Agar produk unggul dari clone FX2 di semua skenario, v1 memakai satu jalur USB
 | Mode | Cara kerja | Samplerate | Durasi | Untuk |
 |---|---|---|---|---|
 | **1. Buffer 100 MHz** (trigger) | SUMP3 RLE (atau raw) ke SDRAM internal, lalu dikirim | 100 MHz | ±1 juta event | Sinyal cepat: SPI 10–25 MHz, glitch 10 ns, timing teliti |
-| **2. Streaming RLE** | Event RLE dialirkan langsung ke PC | 100 MHz | Tak terbatas selama ≤ ±4 juta event/s | Sinyal dengan jeda: UART, I2C, GPIO; rekam menit sampai jam |
+| **2. Streaming RLE** | Event RLE dialirkan langsung ke PC, driver mengurainya ke samplerate pilihan | Link: 100–200 MHz; di PulseView sesuai RAM PC (praktis 1–10 MHz untuk rekaman menit) | Dibatasi RAM PC: samplerate × 2 byte/s | Sinyal dengan jeda: UART, I2C, GPIO; rekam menit sampai jam |
 | **3. Streaming mentah** (seperti FX2) | Sampel mentah dialirkan langsung ke PC | Bisa dipilih; perkiraan maks. **16 ch ±16–20 MS/s**, **8 ch ±32–40 MS/s** | Tak terbatas (dibatasi RAM PC) | Sinyal ramai tapi lambat: LCD SPI ≤ ±5 MHz banyak frame, bus paralel lambat |
 
 Perbandingan per skenario (target):
@@ -351,7 +407,7 @@ menghubungi BlackMesaLabs.
 ## 9. Keputusan yang masih terbuka
 
 - [x] Jumlah channel: **16**
-- [x] Samplerate: **100 MHz** (resolusi 10 ns, sinyal praktis ±25 MHz)
+- [x] Samplerate: ~~100 MHz~~ → **200 MS/s di 16 ch** (target LA2016, 3c). Prototipe S9 sekarang 100 MHz
 - [x] Pasar awal: **Indonesia**
 - [ ] Target harga jual dan target BOM (menentukan pilihan FPGA dan front-end)
 - [ ] Rentang tegangan input dan tingkat proteksi
@@ -365,5 +421,7 @@ menghubungi BlackMesaLabs.
       lebih tinggi atau buffer lebih besar; tentukan apakah masuk target v1
 - [x] Driver dan protokol sendiri (bukan OLS) untuk status capture, upload bertahap, trigger
       tepi, lalu streaming: rancangan v0 di `docs/PROTOCOL_LA16.md`, mulai di board S9 lewat UART
-- [ ] Pilihan FPGA dan USB bridge (setelah P2)
+- [x] Target spesifikasi: **kalahkan Kingst LA2016** (3c); kelas USB 3 (Sipeed) bukan target v1
+- [ ] Cek: chip DDR S9, harga LA2016 dan Tang Primer 20K di marketplace Indonesia
+- [ ] Pilihan FPGA dan USB bridge (setelah P2; kandidat Tang Primer 20K + FT232H)
 - [ ] Model distribusi: open hardware penuh, atau hardware terbuka + produk jadi berbayar
