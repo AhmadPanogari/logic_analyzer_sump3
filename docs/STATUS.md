@@ -41,6 +41,7 @@ Prototipe: board kontrol Antminer S9 bekas (Zynq XC7Z010-1CLG400, DDR3L 512 MB,
 | Ethernet S9: link + `ping 192.168.1.10` dari laptop (kabel langsung) | ✅ board 24-10-2026 |
 | PulseView Windows menemukan la16 lewat Raw TCP (installer dengan `libsigrok-tcp-win32-readable.patch`) | ✅ board 24-10-2026 |
 | Upload la16 lewat Ethernet: server 11,4 MB/s (`-O2`, CRC tabel), driver menguras koneksi | ✅ board 24-10-2026 |
+| Upload RLE (`DATA_RLE`) di server, klien uji Python | ✅ board 24-10-2026 (driver: belum di PulseView) |
 
 ## Sedang dikerjakan
 
@@ -101,6 +102,12 @@ Masalah build yang sudah diatasi:
     capture kecil tetap ±1 ms); invalidate cache per frame → satu `Xil_DCacheFlush()` saat
     upload mulai; `TCP_SND_BUF` 65535. Sekarang `linkoutput` ±6 µs/paket dan server lebih
     banyak menunggu ACK daripada bekerja: di link 1 Gbit/s angkanya belum diukur.
+16. Upload RLE ( `DATA_RLE` ) di server: format otomatis per blok ( RLE bila > 2 sampel per
+    pasangan ), pemindaian 4 sampel per compare. Kompatibel: RLE hanya bila host menyetel
+    `CONFIG` offset 28 bit0 ( driver baru, bila `IDENT` fitur bit3 ); driver lama tetap mentah.
+    Encoder diuji di host ( decode = isi ring, termasuk wrap / run 65536 / data tak
+    terkompres ) dan di board dengan klien Python: 240 M sampel = 5,43 MB, upload **1,79 s**
+    ( mentah di 100 Mbit ±41 s ); 60 M = 1,36 MB, 0,45 s. Rasio tergantung sinyal.
 
 Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform\export\...`):
 `TCP_WND 16384`, `TCP_SND_BUF 32768`, `MEM_SIZE 262144`, `PBUF_POOL_SIZE 2048`, `LWIP_DHCP 0`,
@@ -109,18 +116,14 @@ Pengaturan lwIP sudah dicek masuk ke BSP (`lwipopts.h` di `D:\la16ws\s9_platform
 
 ## Langkah berikutnya
 
-1. Uji Ethernet di board (link + ping ✅):
-   * `s9_jtag_load.bat build_antminer_s9_la16eth` (init MIO + DDR, bitstream, `dow` ELF, `con`).
-   * Laptop 192.168.1.2/24, tanpa gateway, `ping 192.168.1.10`.
-   * Log program di UART konsol PS J12 (MIO 48/49, 115200), bukan J1. Level J12 belum diukur
-     (bank MIO 1 = 1,8 V).
-   * PulseView (installer run 39973273719): driver `la16`, Network / Raw TCP
-     `192.168.1.10:5555`. Uji capture kecil, lalu besar (puluhan–ratusan juta sampel), ukur
-     kecepatan upload.
-2. Mode streaming (`CONFIG` mode 1/2): DDR sebagai FIFO, ARM mengirim di belakang pointer
+1. **Driver la16 dengan `DATA_RLE`** (patch sudah di repo, belum di-build CI / diuji di
+   PulseView): push → CI → install → capture besar di PulseView harus memakai RLE (log driver
+   tanpa `Ignoring frame 0x87`, data benar, trigger di posisi yang benar).
+2. Kabel CAT6 (sedang dibeli) → cek `Get-NetAdapter` 1 Gbps → ukur upload mentah di 1 Gbit/s.
+3. Mode streaming (`CONFIG` mode 1/2): DDR sebagai FIFO, ARM mengirim di belakang pointer
    tulis. Perlu register pointer tulis di `la16_regs.v` dan dukungan di driver.
-3. RLE (`DATA_RLE`), threshold yang bisa diatur (hardware front-end produk), lalu P2
-   (Tang Primer 20K + FT232H sync FIFO).
+4. Boot tanpa JTAG (FSBL + `BOOT.bin` di microSD), threshold yang bisa diatur (hardware
+   front-end produk), lalu P2 (Tang Primer 20K + FT232H sync FIFO).
 
 ## Catatan teknis penting
 

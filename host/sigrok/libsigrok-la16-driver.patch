@@ -358,10 +358,10 @@ index 0000000..db94688
 +SR_REGISTER_DEV_DRIVER(la16_driver_info);
 diff --git a/src/hardware/la16/protocol.c b/src/hardware/la16/protocol.c
 new file mode 100644
-index 0000000..cc62ef2
+index 0000000..edfe31c
 --- /dev/null
 +++ b/src/hardware/la16/protocol.c
-@@ -0,0 +1,442 @@
+@@ -0,0 +1,492 @@
 +/*
 + * This file is part of the libsigrok project.
 + *
@@ -629,6 +629,9 @@ index 0000000..cc62ef2
 +	WL16(&cfg[20], tr);
 +	WL16(&cfg[22], tf);
 +	WL32(&cfg[24], 0);			/* no trigger timeout */
++	/* Without this flag the device sends raw DATA only */
++	if (devc->features & LA16_FEATURE_RLE_UPLOAD)
++		WL32(&cfg[28], LA16_CFG_HOST_RLE);
 +
 +	sr_info("Capture: %" PRIu64 " samples at %" PRIu64 " Hz ( divider %"
 +		PRIu64 " ), %" PRIu64 " pre-trigger, level %04x/%04x rise %04x"
@@ -702,23 +705,14 @@ index 0000000..cc62ef2
 +	sr_session_send(sdi, &packet);
 +}
 +
-+/* DATA: samples go to the session at once, oldest first. */
-+static void handle_data(const struct sr_dev_inst *sdi, const struct la16_frame *f)
++/* Samples first .. first + n - 1 to the session, the trigger marker in place. */
++static void emit_samples(const struct sr_dev_inst *sdi, uint64_t first,
++	const uint8_t *s, uint64_t n)
 +{
 +	struct dev_context *devc;
-+	const uint8_t *s;
-+	uint64_t first, n, k;
++	uint64_t k;
 +
 +	devc = sdi->priv;
-+	if (f->len < 4)
-+		return;
-+	first = RL32(f->payload);
-+	n = (f->len - 4) / 2;
-+	s = &f->payload[4];
-+	if (first != devc->samples_sent)
-+		sr_warn("DATA at sample %" PRIu64 ", expected %" PRIu64 ".",
-+			first, devc->samples_sent);
-+
 +	if (devc->trigger_pos >= 0 && !devc->trigger_sent &&
 +			(uint64_t)devc->trigger_pos < first + n) {
 +		k = (uint64_t)devc->trigger_pos > first ?
@@ -731,6 +725,59 @@ index 0000000..cc62ef2
 +		send_logic(sdi, s, n);
 +	}
 +	devc->samples_sent = first + n;
++}
++
++static void check_index(struct dev_context *devc, const char *what, uint64_t first)
++{
++	if (first != devc->samples_sent)
++		sr_warn("%s at sample %" PRIu64 ", expected %" PRIu64 ".",
++			what, first, devc->samples_sent);
++}
++
++/* DATA: samples go to the session at once, oldest first. */
++static void handle_data(const struct sr_dev_inst *sdi, const struct la16_frame *f)
++{
++	uint64_t first;
++
++	if (f->len < 4)
++		return;
++	first = RL32(f->payload);
++	check_index(sdi->priv, "DATA", first);
++	emit_samples(sdi, first, &f->payload[4], (f->len - 4) / 2);
++}
++
++/* DATA_RLE: ( value, count - 1 ) pairs, expanded in LA16_RLE_CHUNK pieces. */
++static void handle_data_rle(const struct sr_dev_inst *sdi,
++	const struct la16_frame *f)
++{
++	struct dev_context *devc;
++	uint64_t at;
++	size_t fill;
++	uint32_t count;
++	unsigned int i;
++	uint8_t lo, hi;
++
++	devc = sdi->priv;
++	if (f->len < 4)
++		return;
++	at = RL32(f->payload);
++	check_index(devc, "DATA_RLE", at);
++	fill = 0;
++	for (i = 4; i + 4 <= f->len; i += 4) {
++		lo = f->payload[i];
++		hi = f->payload[i + 1];
++		count = RL16(&f->payload[i + 2]) + 1;
++		while (count--) {
++			devc->rle_buf[2 * fill] = lo;
++			devc->rle_buf[2 * fill + 1] = hi;
++			if (++fill == LA16_RLE_CHUNK) {
++				emit_samples(sdi, at, devc->rle_buf, fill);
++				at += fill;
++				fill = 0;
++			}
++		}
++	}
++	emit_samples(sdi, at, devc->rle_buf, fill);
 +}
 +
 +/* Handle one frame of a running capture. TRUE when the capture is over. */
@@ -750,6 +797,9 @@ index 0000000..cc62ef2
 +		break;
 +	case LA16_RSP_DATA:
 +		handle_data(sdi, f);
++		break;
++	case LA16_RSP_DATA_RLE:
++		handle_data_rle(sdi, f);
 +		break;
 +	case LA16_RSP_END:
 +		flags = f->len >= 5 ? f->payload[4] : 0;
@@ -806,10 +856,10 @@ index 0000000..cc62ef2
 +}
 diff --git a/src/hardware/la16/protocol.h b/src/hardware/la16/protocol.h
 new file mode 100644
-index 0000000..7d3a049
+index 0000000..bfbdd66
 --- /dev/null
 +++ b/src/hardware/la16/protocol.h
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,121 @@
 +/*
 + * This file is part of the libsigrok project.
 + *
@@ -862,12 +912,16 @@ index 0000000..7d3a049
 +#define LA16_RSP_DATA		0x84
 +#define LA16_RSP_TRIGGER	0x85
 +#define LA16_RSP_END		0x86
++#define LA16_RSP_DATA_RLE	0x87
 +#define LA16_RSP_ERROR		0x8F
 +
 +#define LA16_CONFIG_LEN		32
 +#define LA16_END_ABORTED	(1 << 1)
 +#define LA16_END_TIMEOUT	(1 << 2)
 +#define LA16_FEATURE_EDGE	(1 << 0)
++#define LA16_FEATURE_RLE_UPLOAD	(1 << 3)	/* device sends DATA_RLE when asked */
++#define LA16_CFG_HOST_RLE	(1 << 0)	/* CONFIG offset 28: we decode DATA_RLE */
++#define LA16_RLE_CHUNK		8192		/* samples per session packet from RLE */
 +
 +#define LA16_NUM_CHANNELS	16
 +#define LA16_MIN_SAMPLES	16
@@ -911,6 +965,7 @@ index 0000000..7d3a049
 +	gboolean trigger_sent;
 +	uint8_t last_state;
 +	int64_t last_rx_us;
++	uint8_t rle_buf[2 * LA16_RLE_CHUNK];	/* DATA_RLE expanded */
 +};
 +
 +SR_PRIV uint8_t la16_crc8(const uint8_t *data, size_t len);

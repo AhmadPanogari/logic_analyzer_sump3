@@ -67,7 +67,7 @@ Semua frame, dua arah:
 | Offset | Tipe | Isi |
 |---|---|---|
 | 0 | u8 | mode: 0 = buffer (v0). 1 = streaming mentah, 2 = streaming RLE (cadangan) |
-| 1 | u8 | format upload: 0 = mentah, 1 = RLE, 2 = otomatis (perangkat memilih yang lebih kecil per blok) |
+| 1 | u8 | format upload: 0 = mentah, 1 = RLE, 2 = otomatis (perangkat memilih yang lebih kecil per blok). 1 dan 2 hanya berlaku bila offset 28 bit0 = 1; tanpa itu perangkat mengirim mentah |
 | 2 | u16 | channel aktif (bit per channel). v0 selalu mengirim 16 bit per sampel |
 | 4 | u32 | divider: samplerate = clock dasar / (divider + 1). Clock dasar dari `IDENT` (S9 sekarang 100 MHz, target 200 MS/s) |
 | 8 | u32 | jumlah sampel total |
@@ -77,7 +77,7 @@ Semua frame, dua arah:
 | 20 | u16 | trigger tepi naik: mask |
 | 22 | u16 | trigger tepi turun: mask |
 | 24 | u32 | timeout trigger dalam ms (0 = tanpa batas) |
-| 28 | u32 | cadangan (0) |
+| 28 | u32 | flag host: bit0 = host mengurai `DATA_RLE`. Hanya dikirim ke perangkat dengan fitur bit3 di `IDENT`. Bit lain 0 |
 
 Trigger terjadi pada sampel di mana **semua** syarat terpenuhi bersamaan (AND, sama dengan
 semantik trigger satu stage sigrok): channel di mask level sama dengan nilainya, channel di
@@ -88,11 +88,11 @@ mask naik berubah 0→1, channel di mask turun berubah 1→0. Channel di kedua m
 
 | type | Nama | Payload |
 |---|---|---|
-| 0x81 | `IDENT` | u8 versi protokol (1), u8 jumlah channel (16), u32 clock dasar (100000000 atau 200000000), u32 sampel maks. (BRAM 64K, DDR ratusan juta), u16 fitur (bit0 trigger tepi, bit1 streaming mentah, bit2 streaming RLE), lalu string ASCII `vendor\0model\0versi\0` |
+| 0x81 | `IDENT` | u8 versi protokol (1), u8 jumlah channel (16), u32 clock dasar (100000000 atau 200000000), u32 sampel maks. (BRAM 64K, DDR ratusan juta), u16 fitur (bit0 trigger tepi, bit1 streaming mentah, bit2 streaming RLE, bit3 upload `DATA_RLE`), lalu string ASCII `vendor\0model\0versi\0` |
 | 0x82 | `ACK` | u8 type perintah yang dijawab |
 | 0x83 | `STATUS` | u8 state, u32 sampel tertangkap, u32 total. Dikirim tiap ±50 ms selama armed, dan setiap kali state berubah |
-| 0x84 | `DATA` | u32 indeks sampel pertama, lalu N × u16 sampel (N ≤ 256), **terlama dulu** |
-| 0x87 | `DATA_RLE` | u32 indeks sampel pertama, lalu N × (u16 nilai, u16 jumlah−1), **terlama dulu**. Driver mengurainya menjadi sampel biasa |
+| 0x84 | `DATA` | u32 indeks sampel pertama, lalu N × u16 sampel (N ≤ 510), **terlama dulu** |
+| 0x87 | `DATA_RLE` | u32 indeks sampel pertama, lalu N × (u16 nilai, u16 jumlah−1), N ≤ 255, **terlama dulu**. Driver mengurainya menjadi sampel biasa. Format otomatis memakai `DATA_RLE` bila sampel yang tercakup > 2 × N (lebih kecil dari mentah), selain itu `DATA` |
 | 0x85 | `TRIGGER` | u32 indeks sampel trigger. Dikirim sebelum `DATA` pertama |
 | 0x86 | `END` | u32 jumlah sampel terkirim, u8 flag (bit0 overflow, bit1 aborted, bit2 timeout) |
 | 0x8F | `ERROR` | u8 kode (1 CRC, 2 type tak dikenal, 3 config tidak valid, 4 sibuk) |
@@ -107,6 +107,10 @@ host: CONFIG ─► ACK
 host: ARM    ─► ACK, STATUS(1) … STATUS(2) … STATUS(3)
                 STATUS(4), TRIGGER(idx), DATA, DATA, …, END
 ```
+
+Kompatibilitas RLE: driver la16 pertama meminta format 2 tetapi membuang `DATA_RLE`. Karena itu
+perangkat baru mengirim RLE hanya untuk host yang menyetel flag offset 28, dan driver baru
+menyetelnya hanya bila `IDENT` punya fitur bit3 (perangkat lama, mis. RTL UART, tidak).
 
 ## Memory depth dan streaming (ringkasan)
 

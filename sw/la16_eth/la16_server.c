@@ -82,6 +82,16 @@ static void s9_phy_poll(void) {}
 #define END_ABORTED		0x02
 #define END_TIMEOUT		0x04
 #define DATA_SAMPLES		510		/* ( 1024 - 4 ) / 2 */
+#define R_DATA_RLE		0x87
+#define RLE_PAIRS		255		/* ( 1024 - 4 ) / 4: ( u16 value, u16 count - 1 ) */
+#define RLE_MAX_RUN		65536
+#define RLE_SCAN_MAX		(4u << 20)	/* samples per frame, keeps the main loop going */
+#define FEAT_EDGE		0x01
+#define FEAT_RLE_UPLOAD		0x08		/* IDENT: DATA_RLE upload */
+#define CFG_HOST_RLE		0x01		/* CONFIG offset 28: host decodes DATA_RLE */
+#define FMT_RAW			0
+#define FMT_RLE			1
+#define FMT_AUTO		2
 #define STATUS_PERIOD_MS	50
 
 enum state { S_IDLE, S_CAPTURE, S_TRIGGER, S_DATA, S_END };
@@ -98,6 +108,7 @@ static u32 txq_len;
 static enum state st = S_IDLE;
 static int configured;
 static u32 cfg_div, cfg_total, cfg_pre, cfg_tlm, cfg_tlv, cfg_trm, cfg_tfm, cfg_tmo;
+static u8 cfg_fmt;		/* FMT_*, raw unless the host decodes DATA_RLE */
 static u32 up_sent, up_start, up_ring, ddr_base, max_samples;
 static u8 end_flags, last_code = 0xFF, idle_code;
 static XTime t_arm, t_status;
@@ -298,7 +309,7 @@ static void send_ident(void)
 	p[1] = 16;			/* channels */
 	wl32(&p[2], reg_rd(R_BASE_HZ));
 	wl32(&p[6], max_samples);
-	p[10] = 0x01;			/* features: edge triggers */
+	p[10] = FEAT_EDGE | FEAT_RLE_UPLOAD;	/* features */
 	p[11] = 0x00;
 	memcpy(&p[12], strings, sizeof(strings));
 	queue(R_IDENT, p, sizeof(p));
@@ -322,11 +333,16 @@ static void handle_command(u8 type, const u8 *p, u32 len)
 		}
 		total = rl32(&p[8]);
 		pre = rl32(&p[12]);
-		if (len != 32 || p[0] != 0 || (p[1] != 0 && p[1] != 2) ||
+		if (len != 32 || p[0] != 0 || p[1] > FMT_AUTO ||
 				total == 0 || total > max_samples || pre >= total) {
 			send_error(E_CONFIG);
 			break;
 		}
+		/*
+		 * RLE only for a host that says it decodes DATA_RLE: the first
+		 * la16 drivers ask for "auto" but drop DATA_RLE frames.
+		 */
+		cfg_fmt = (rl32(&p[28]) & CFG_HOST_RLE) ? p[1] : FMT_RAW;
 		cfg_div = rl32(&p[4]);
 		cfg_total = total;
 		cfg_pre = pre;
@@ -423,6 +439,111 @@ static u32 make_data(u8 *buf)
 	return frame(buf, R_DATA, p, 4 + 2 * n);
 }
 
+/* Samples from capture index i ( 0 = oldest ) to the ring end */
+static const u16 *ring_at(u32 i, u32 *left)
+{
+	u32 j = up_start + i;
+
+	if (j >= up_ring)
+		j -= up_ring;
+	*left = up_ring - j;
+	return (const u16 *)(uintptr_t)(ddr_base + 2 * j);
+}
+
+typedef u64 __attribute__((may_alias)) u64_alias;
+
+/* How many of s[0 .. lim - 1] equal v: 4 samples per compare where aligned */
+static u32 same_run(const u16 *s, u32 lim, u16 v)
+{
+	u64 vv = v * 0x0001000100010001ull;
+	u32 k = 0;
+
+	while (k < lim && ((uintptr_t)(s + k) & 7)) {
+		if (s[k] != v)
+			return k;
+		k++;
+	}
+	while (k + 4 <= lim && *(const u64_alias *)(s + k) == vv)
+		k += 4;
+	while (k < lim && s[k] == v)
+		k++;
+	return k;
+}
+
+static void put_pair(u8 *p, u32 pair, u16 v, u32 run)
+{
+	p += 4 + 4 * pair;
+	p[0] = v;
+	p[1] = v >> 8;
+	p[2] = run - 1;
+	p[3] = (run - 1) >> 8;
+}
+
+/*
+ * Run-length code the samples from up_sent into p[4..] as up to RLE_PAIRS
+ * ( value, count - 1 ) pairs. Returns the pair count, *covered the samples.
+ */
+static u32 rle_scan(u8 *p, u32 *covered)
+{
+	const u16 *s = NULL;
+	u32 i = up_sent, end, left = 0, pairs = 0, run = 0, k, lim;
+	u16 v = 0;
+
+	end = cfg_total - up_sent > RLE_SCAN_MAX ? up_sent + RLE_SCAN_MAX : cfg_total;
+	while (i < end) {
+		if (!left)
+			s = ring_at(i, &left);
+		if (!run) {
+			v = *s++;
+			run = 1;
+			i++;
+			left--;
+			continue;
+		}
+		lim = left;
+		if (lim > end - i)
+			lim = end - i;
+		if (lim > RLE_MAX_RUN - run)
+			lim = RLE_MAX_RUN - run;
+		k = same_run(s, lim, v);
+		run += k;
+		i += k;
+		s += k;
+		left -= k;
+		/* Stopped short ( s[0] differs ) or full: the run is over */
+		if (k < lim || run == RLE_MAX_RUN) {
+			put_pair(p, pairs, v, run);
+			run = 0;
+			if (++pairs == RLE_PAIRS)
+				break;
+		}
+	}
+	if (run)			/* only left after the loop ran out of samples */
+		put_pair(p, pairs++, v, run);
+	*covered = i - up_sent;
+	return pairs;
+}
+
+/*
+ * One upload frame: DATA_RLE when the format asks for it ( auto: when the
+ * pairs are smaller than the same samples raw ), else DATA. In auto mode a
+ * failed RLE try scans at most 2 * RLE_PAIRS samples.
+ */
+static u32 make_block(u8 *buf)
+{
+	u8 p[4 + 4 * RLE_PAIRS];
+	u32 pairs, covered;
+
+	if (cfg_fmt == FMT_RAW)
+		return make_data(buf);
+	pairs = rle_scan(p, &covered);
+	if (cfg_fmt == FMT_AUTO && covered <= 2 * pairs)
+		return make_data(buf);
+	wl32(p, up_sent);
+	up_sent += covered;
+	return frame(buf, R_DATA_RLE, p, 4 + 4 * pairs);
+}
+
 /* Push queued control frames, then DATA, as far as lwIP has room */
 static void pump_tx(void)
 {
@@ -451,7 +572,7 @@ static void pump_tx(void)
 			st = S_DATA;
 		} else if (st == S_DATA) {
 			PROF_START();
-			n = make_data(buf);
+			n = make_block(buf);
 			PROF_ADD(P_MAKE);
 			if (up_sent >= cfg_total)
 				st = S_END;
