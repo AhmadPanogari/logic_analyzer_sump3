@@ -3,6 +3,8 @@ vivado/build_*/
 vivado/*.log
 vivado/*.jou
 vivado/.Xil/
+vivado/clockInfo.txt
+vivado/vitis_out.txt
 *.backup.*
 # Simulation
 sim/build/
@@ -10,6 +12,7 @@ sim/build/
 # Host runtime ( sump3.py / bd_server.py working directory )
 host/work/
 __pycache__/
+.venv/
 *.sr
 # cocotb co-simulation
 sim/ols/sim_build/
